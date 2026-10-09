@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Первичное развёртывание ВольтЛиния CRM на сервере (Ubuntu/Debian с Docker).
-# Запуск: bash <(curl -fsSL https://raw.githubusercontent.com/konstantinkleman/voltliniya-crm/main/deploy.sh)
+# Репозиторий приватный, поэтому запуск через токен GitHub (Settings → Developer settings → Tokens, права: repo):
+#   GH_TOKEN=ghp_xxx bash <(curl -fsSL -H "Authorization: token ghp_xxx" https://raw.githubusercontent.com/konstantinkleman/voltliniya-crm/main/deploy.sh)
 # Повторный запуск безопасен: обновит код и пересоберёт контейнеры, .env не тронет.
 set -euo pipefail
 
 DIR=/opt/voltliniya-crm
-REPO=https://github.com/konstantinkleman/voltliniya-crm
+REPO=https://${GH_TOKEN:+$GH_TOKEN@}github.com/konstantinkleman/voltliniya-crm
 DOMAIN=${DOMAIN:-crm.voltliniya.ru}
 ADMIN_EMAIL=${ADMIN_EMAIL:-voltliniya@yandex.ru}
 
@@ -13,10 +14,13 @@ command -v docker >/dev/null || { echo "Нужен Docker: curl -fsSL https://ge
 command -v git >/dev/null || apt-get install -y git
 
 if [ -d "$DIR/.git" ]; then
+  [ -n "${GH_TOKEN:-}" ] && git -C "$DIR" remote set-url origin "$REPO"
   git -C "$DIR" pull --ff-only
 else
   git clone "$REPO" "$DIR"
 fi
+# токен остаётся в .git/config только для git pull при обновлениях; доступ к каталогу — только root
+chmod 700 "$DIR"
 cd "$DIR"
 
 # 1. Освободить порты 80/443: старая система voltline-warehouse держит их через свой Caddy.
