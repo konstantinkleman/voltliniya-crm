@@ -24,21 +24,17 @@ chmod 700 "$DIR"
 cd "$DIR"
 
 # 1. Освободить порты 80/443: их держит Caddy старой системы voltline-warehouse.
-#    Останавливаем все контейнеры старой системы (боевой и тестовый стенды). Тома с данными не трогаем —
-#    41 позиция номенклатуры останется в Postgres и будет перенесена при запуске склада.
-OLD=$(docker ps -q --filter name=voltline-warehouse || true)
-if [ -n "$OLD" ]; then
-  echo "Останавливаю старую систему voltline-warehouse (данные в томах сохраняются)…"
-  docker stop $OLD >/dev/null || true
-fi
-# tg-relay и боты старой системы порты 80/443 не занимают, их не трогаем.
-if ss -ltn | grep -qE ':(80|443) '; then
-  echo "Порты 80/443 всё ещё заняты:"; ss -ltnp | grep -E ':(80|443) ' || true
-  echo "Останавливаю контейнеры, которые их публикуют…"
-  for c in $(docker ps -q); do
-    if docker port "$c" 2>/dev/null | grep -qE ':(80|443)$'; then docker stop "$c" >/dev/null || true; fi
-  done
-fi
+#    Останавливаем контейнеры старой системы. Тома с данными не трогаем.
+set +e
+echo "Останавливаю старую систему voltline-warehouse (данные в томах сохраняются)…"
+docker ps --format '{{.Names}}' | grep -E '^voltline-warehouse' | xargs -r docker stop
+for c in $(docker ps -q); do
+  if docker port "$c" 2>/dev/null | grep -qE ':(80|443)$'; then
+    echo "Останавливаю $(docker inspect -f '{{.Name}}' "$c") — занимает 80/443"; docker stop "$c"
+  fi
+done
+echo "Порты 80/443 после остановки:"; ss -ltnp | grep -E ':(80|443) ' || echo "свободны"
+set -e
 
 # 2. .env — создаётся один раз со случайными секретами.
 if [ ! -f .env ]; then
