@@ -4,6 +4,7 @@
 #   GH_TOKEN=ghp_xxx bash <(curl -fsSL -H "Authorization: token ghp_xxx" https://raw.githubusercontent.com/konstantinkleman/voltliniya-crm/main/deploy.sh)
 # Повторный запуск безопасен: обновит код и пересоберёт контейнеры, .env не тронет.
 set -euo pipefail
+trap 'echo "Ошибка на строке $LINENO: $BASH_COMMAND" >&2' ERR
 
 DIR=/opt/voltliniya-crm
 REPO=https://${GH_TOKEN:+$GH_TOKEN@}github.com/konstantinkleman/voltliniya-crm
@@ -43,9 +44,8 @@ set -e
 
 # 2. .env — создаётся один раз со случайными секретами.
 if [ ! -f .env ]; then
-  PG=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)
-  JWT=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
-  ADM=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
+  rnd() { head -c 64 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c "$1" || true; }
+  PG=$(rnd 24); JWT=$(rnd 48); ADM=$(rnd 12)
   cat > .env <<EOF
 DOMAIN=$DOMAIN
 POSTGRES_DB=crm
