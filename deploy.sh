@@ -13,11 +13,16 @@ ADMIN_EMAIL=${ADMIN_EMAIL:-voltliniya@yandex.ru}
 command -v docker >/dev/null || { echo "Нужен Docker: curl -fsSL https://get.docker.com | sh"; exit 1; }
 command -v git >/dev/null || apt-get install -y git
 
-if [ -d "$DIR/.git" ]; then
-  [ -n "${GH_TOKEN:-}" ] && git -C "$DIR" remote set-url origin "$REPO"
-  git -C "$DIR" pull --ff-only
-else
-  git clone "$REPO" "$DIR"
+# Обновление кода. Скрипт перезаписывает сам себя при git pull, поэтому после обновления
+# перезапускаемся заново (bash читает файл по ходу выполнения, иначе выполнение обрывается).
+if [ -z "${DEPLOY_RESTARTED:-}" ]; then
+  if [ -d "$DIR/.git" ]; then
+    [ -n "${GH_TOKEN:-}" ] && git -C "$DIR" remote set-url origin "$REPO"
+    git -C "$DIR" pull --ff-only
+  else
+    git clone "$REPO" "$DIR"
+  fi
+  DEPLOY_RESTARTED=1 exec bash "$DIR/deploy.sh"
 fi
 # токен остаётся в .git/config только для git pull при обновлениях; доступ к каталогу — только root
 chmod 700 "$DIR"
