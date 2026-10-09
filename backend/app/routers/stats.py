@@ -68,7 +68,8 @@ def foremen(month: str | None = None, _: m.User = Depends(director), db: Session
     out = []
     for u in users:
         objs = db.scalars(select(m.WorkObject).where(m.WorkObject.foreman_id == u.id)).all()
-        in_month = [o for o in objs if deal_month(o, db.scalar(select(m.Lead).where(m.Lead.object_id == o.id))) == (y, mo)]
+        salary_objs = db.scalars(select(m.WorkObject).where(m.WorkObject.salary_foreman_id == u.id)).all()
+        in_month = [o for o in salary_objs if deal_month(o, db.scalar(select(m.Lead).where(m.Lead.object_id == o.id))) == (y, mo)]
         fins = [compute(db, o, full=False) for o in objs]
         accrued = sum((f.crew_plan for f in fins), Decimal(0))
         paid = sum((f.crew_paid for f in fins), Decimal(0))

@@ -75,13 +75,14 @@ def client_cost(db: Session, o: WorkObject, lead: Lead | None) -> Decimal:
 
 def foreman_share(db: Session, o: WorkObject, lead: Lead | None) -> tuple[Decimal | None, int | None]:
     """Доля зарплаты прораба: его месячная зарплата / число его объектов в месяце сделки."""
-    if not o.foreman_id:
+    fid = o.salary_foreman_id or o.foreman_id
+    if not fid:
         return None, None
-    foreman = db.get(User, o.foreman_id)
+    foreman = db.get(User, fid)
     if not foreman or not foreman.salary:
         return None, None
     y, m = deal_month(o, lead)
-    mine = [d for d in _objects_in_month(db, y, m) if d.foreman_id == o.foreman_id]
+    mine = [d for d in _objects_in_month(db, y, m) if (d.salary_foreman_id or d.foreman_id) == fid]
     n = max(len(mine), 1)
     return q(foreman.salary / n), n
 

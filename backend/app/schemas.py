@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as Date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,8 +50,8 @@ class CrewAssignmentOut(ORM):
     id: int
     foreman_id: int | None
     foreman_name: str | None = None
-    from_date: date
-    to_date: date | None
+    from_date: Date
+    to_date: Date | None
     note: str | None
 
 
@@ -163,7 +163,7 @@ class LeadOut(ORM):
     offer_sum: Decimal | None
     tariff: str | None
     note: str | None
-    won_at: date | None
+    won_at: Date | None
     object_id: int | None
     created_at: datetime
     updated_at: datetime
@@ -179,7 +179,7 @@ class LeadConvert(BaseModel):
     materials_client_sum: Decimal = Decimal(0)
     tariff: str | None = None
     foreman_id: int | None = None
-    start_date: date | None = None
+    start_date: Date | None = None
     contract_number: str | None = None
 
 
@@ -187,7 +187,7 @@ class LeadConvert(BaseModel):
 class PaymentIn(BaseModel):
     number: int = 1
     amount: Decimal
-    date: date
+    date: Date
     method: str = "transfer"
     note: str | None = None
 
@@ -198,7 +198,7 @@ class PaymentOut(ORM, PaymentIn):
 
 class PayoutIn(BaseModel):
     amount: Decimal
-    date: date
+    date: Date
     method: str = "transfer"
     note: str | None = None
 
@@ -212,7 +212,7 @@ class PayoutOut(ORM, PayoutIn):
 class ExtraWorkIn(BaseModel):
     title: str
     amount: Decimal
-    date: date | None = None
+    date: Date | None = None
 
 
 class ExtraWorkOut(ORM, ExtraWorkIn):
@@ -224,7 +224,7 @@ class MaterialIn(BaseModel):
     qty: Decimal | None = None
     unit: str | None = None
     cost_sum: Decimal
-    date: date | None = None
+    date: Date | None = None
 
 
 class MaterialOut(ORM, MaterialIn):
@@ -245,7 +245,7 @@ class ObjectCreate(BaseModel):
     tariff: str | None = None
     source: str | None = None
     foreman_id: int | None = None
-    start_date: date | None = None
+    start_date: Date | None = None
     works_sum: Decimal = Decimal(0)
     materials_client_sum: Decimal = Decimal(0)
     contract_number: str | None = None
@@ -260,8 +260,8 @@ class ObjectUpdate(BaseModel):
     tariff: str | None = None
     source: str | None = None
     foreman_id: int | None = None
-    start_date: date | None = None
-    end_date: date | None = None
+    start_date: Date | None = None
+    end_date: Date | None = None
     works_sum: Decimal | None = None
     materials_client_sum: Decimal | None = None
     contract_number: str | None = None
@@ -308,8 +308,8 @@ class ObjectOut(ORM):
     foreman_name: str | None = None
     crew_id: int | None
     crew_name: str | None = None
-    start_date: date | None
-    end_date: date | None
+    start_date: Date | None
+    end_date: Date | None
     contract_number: str | None
     note: str | None
     created_at: datetime
@@ -327,7 +327,7 @@ class ObjectDetail(ObjectOut):
 
 # ---------- expenses ----------
 class ExpenseIn(BaseModel):
-    date: date
+    date: Date
     amount: Decimal
     category: str
     foreman_id: int | None = None

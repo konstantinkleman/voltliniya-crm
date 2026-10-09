@@ -55,7 +55,7 @@ def list_objects(stage: str | None = None, active: bool | None = None,
 
 @router.post("", response_model=ObjectDetail)
 def create_object(data: ObjectCreate, user: m.User = Depends(director), db: Session = Depends(get_db)):
-    o = m.WorkObject(**data.model_dump(), crew_id=_crew_for(db, data.foreman_id))
+    o = m.WorkObject(**data.model_dump(), crew_id=_crew_for(db, data.foreman_id), salary_foreman_id=data.foreman_id)
     db.add(o)
     db.flush()
     db.add(m.ObjectStageLog(object_id=o.id, stage="contract", user_id=user.id))
@@ -76,6 +76,8 @@ def update_object(oid: int, data: ObjectUpdate, user: m.User = Depends(director)
     patch = data.model_dump(exclude_unset=True)
     if "foreman_id" in patch:
         o.crew_id = _crew_for(db, patch["foreman_id"])
+        if o.salary_foreman_id is None or o.stage == "contract":
+            o.salary_foreman_id = patch["foreman_id"]
     for k, v in patch.items():
         setattr(o, k, v)
     db.commit()

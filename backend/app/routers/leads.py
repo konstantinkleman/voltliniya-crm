@@ -121,7 +121,7 @@ def convert(lid: int, data: LeadConvert, user: m.User = Depends(director), db: S
         crew_id = crew.id if crew else None
     obj = m.WorkObject(
         client_name=lead.name, phone=lead.phone, address=lead.address, area_m2=lead.area_m2,
-        tariff=data.tariff or lead.tariff, source=lead.source, foreman_id=foreman_id, crew_id=crew_id,
+        tariff=data.tariff or lead.tariff, source=lead.source, foreman_id=foreman_id, crew_id=crew_id, salary_foreman_id=foreman_id,
         start_date=data.start_date, works_sum=data.works_sum, materials_client_sum=data.materials_client_sum,
         contract_number=data.contract_number, note=lead.note,
     )

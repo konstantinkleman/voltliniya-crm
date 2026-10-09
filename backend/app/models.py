@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as Date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -109,8 +109,8 @@ class CrewAssignment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     crew_id: Mapped[int] = mapped_column(ForeignKey("crews.id"))
     foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    from_date: Mapped[date] = mapped_column(Date)
-    to_date: Mapped[date | None] = mapped_column(Date)
+    from_date: Mapped[Date] = mapped_column(Date)
+    to_date: Mapped[Date | None] = mapped_column(Date)
     note: Mapped[str | None] = mapped_column(Text)
 
     crew: Mapped["Crew"] = relationship(back_populates="history")
@@ -132,7 +132,7 @@ class Lead(Base, TimestampMixin):
     offer_sum: Mapped[Decimal | None] = mapped_column(Money)  # сумма отправленного КП
     tariff: Mapped[str | None] = mapped_column(String(30))
     note: Mapped[str | None] = mapped_column(Text)
-    won_at: Mapped[date | None] = mapped_column(Date)
+    won_at: Mapped[Date | None] = mapped_column(Date)
     object_id: Mapped[int | None] = mapped_column(ForeignKey("objects.id"))
 
     activities: Mapped[list["LeadActivity"]] = relationship(back_populates="lead", order_by="LeadActivity.id.desc()", cascade="all, delete-orphan")
@@ -165,8 +165,10 @@ class WorkObject(Base, TimestampMixin):
     stage: Mapped[str] = mapped_column(String(20), default="contract", index=True)
     foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     crew_id: Mapped[int | None] = mapped_column(ForeignKey("crews.id"))
-    start_date: Mapped[date | None] = mapped_column(Date)
-    end_date: Mapped[date | None] = mapped_column(Date)
+    # кто вёл объект в месяце сделки — на него относится доля зарплаты, даже если бригаду потом переназначили
+    salary_foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    start_date: Mapped[Date | None] = mapped_column(Date)
+    end_date: Mapped[Date | None] = mapped_column(Date)
     works_sum: Mapped[Decimal] = mapped_column(Money, default=0)            # работы по смете
     materials_client_sum: Mapped[Decimal] = mapped_column(Money, default=0)  # материалы для клиента по смете
     note: Mapped[str | None] = mapped_column(Text)
@@ -199,7 +201,7 @@ class ExtraWork(Base):
     object_id: Mapped[int] = mapped_column(ForeignKey("objects.id"))
     title: Mapped[str] = mapped_column(String(300))
     amount: Mapped[Decimal] = mapped_column(Money)
-    date: Mapped[date | None] = mapped_column(Date)
+    date: Mapped[Date | None] = mapped_column(Date)
     object: Mapped["WorkObject"] = relationship(back_populates="extra_works")
 
 
@@ -212,7 +214,7 @@ class MaterialLine(Base):
     qty: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     unit: Mapped[str | None] = mapped_column(String(20))
     cost_sum: Mapped[Decimal] = mapped_column(Money, default=0)  # себестоимость, итого
-    date: Mapped[date | None] = mapped_column(Date)
+    date: Mapped[Date | None] = mapped_column(Date)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     object: Mapped["WorkObject"] = relationship(back_populates="materials")
 
@@ -224,7 +226,7 @@ class Payment(Base):
     object_id: Mapped[int] = mapped_column(ForeignKey("objects.id"))
     number: Mapped[int] = mapped_column(Integer, default=1)  # 1 — до старта, 2 — после сдачи, 3+ — доп.
     amount: Mapped[Decimal] = mapped_column(Money)
-    date: Mapped[date] = mapped_column(Date)
+    date: Mapped[Date] = mapped_column(Date)
     method: Mapped[str] = mapped_column(String(20), default="transfer")
     note: Mapped[str | None] = mapped_column(Text)
     object: Mapped["WorkObject"] = relationship(back_populates="payments")
@@ -238,7 +240,7 @@ class CrewPayout(Base):
     crew_id: Mapped[int | None] = mapped_column(ForeignKey("crews.id"))
     foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     amount: Mapped[Decimal] = mapped_column(Money)
-    date: Mapped[date] = mapped_column(Date)
+    date: Mapped[Date] = mapped_column(Date)
     method: Mapped[str] = mapped_column(String(20), default="transfer")
     note: Mapped[str | None] = mapped_column(Text)
     object: Mapped["WorkObject"] = relationship(back_populates="payouts")
@@ -249,7 +251,7 @@ class CrewPayout(Base):
 class Expense(Base, TimestampMixin):
     __tablename__ = "expenses"
     id: Mapped[int] = mapped_column(primary_key=True)
-    date: Mapped[date] = mapped_column(Date, index=True)
+    date: Mapped[Date] = mapped_column(Date, index=True)
     amount: Mapped[Decimal] = mapped_column(Money)
     category: Mapped[str] = mapped_column(String(30), index=True)
     channel: Mapped[str | None] = mapped_column(String(30))     # источник, если расход по каналу
