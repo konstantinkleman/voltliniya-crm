@@ -7,11 +7,14 @@ from . import models as m
 from .auth import hash_password
 from .config import settings
 from .db import Base, SessionLocal, engine
+from .avito import review as avito_review
+from .avito.router import router as avito_router
 from .routers import auth, crews, documents, expenses, leads, objects, stats, stock
 
 app = FastAPI(title="ВольтЛиния CRM", docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router, stock.router):
+for r in (auth.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router, stock.router,
+          avito_router):
     app.include_router(r)
 
 # Версия сборки: deploy.sh кладёт короткий хеш коммита в APP_VERSION. Фронт сравнивает заголовок
@@ -45,6 +48,7 @@ def startup():
                 if not db.scalar(select(m.Warehouse).where(m.Warehouse.foreman_id == u.id)):
                     db.add(m.Warehouse(name=f"Склад {u.name}", foreman_id=u.id))
             db.commit()
+    avito_review.start_scheduler()
 
 
 def migrate():
