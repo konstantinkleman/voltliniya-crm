@@ -48,17 +48,8 @@ def all_balances(db: Session, warehouse_id: int | None = None) -> dict[tuple[int
 
 
 def client_price(db: Session, p: Product, avg_cost: Decimal) -> Decimal | None:
-    """Цена клиенту: фиксированная → наценка позиции → наценка категории (вверх по дереву)."""
-    if p.client_price is not None:
-        return q2(p.client_price)
-    pct = p.markup_pct
-    cat = p.category
-    while pct is None and cat is not None:
-        pct = cat.markup_pct
-        cat = cat.parent
-    if pct is None or not avg_cost:
-        return None
-    return q2(avg_cost * (1 + pct / 100))
+    """Цена клиенту задаётся вручную у каждой позиции (процентных наценок нет — решение директора)."""
+    return q2(p.client_price) if p.client_price is not None else None
 
 
 def _check_wh(db: Session, warehouse_id: int) -> Warehouse:

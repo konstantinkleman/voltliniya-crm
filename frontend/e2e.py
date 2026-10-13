@@ -94,7 +94,7 @@ async def main():
         # ---- склад: приход с новой позицией на лету, списание со склада в объект ----
         await pg.goto(BASE + "/#/stock"); await pg.wait_for_selector("[data-receipt]"); await pg.wait_for_timeout(300)
         await pg.click(".seg [data-wh]:has-text('Андрей')"); await pg.wait_for_timeout(400)   # приход на склад прораба объекта
-        await pg.click("[data-newcat]"); await fill_modal({"name": "Кабель", "markup_pct": 40})
+        await pg.click("[data-newcat]"); await fill_modal({"name": "Кабель"})
         await pg.click("[data-receipt]"); await pg.wait_for_selector(".modal.open form")
         await pick(pg, "p0", "новая"); await pg.fill(".modal.open [name=n0]", "ВВГнг-LS 3×2,5"); await pg.fill(".modal.open [name=q0]", "500"); await pg.fill(".modal.open [name=c0]", "86"); await pg.fill(".modal.open [name=s0]", "130")
         await pick(pg, "k0", "Кабель"); await pg.select_option(".modal.open [name=u0]", "м")

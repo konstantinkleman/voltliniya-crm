@@ -105,10 +105,10 @@ print("CREW SUM OK")
 with c:
     whs = get("/api/stock/warehouses"); assert any(w["foreman_name"] == "Новый прораб" for w in whs), whs
     wh = [w for w in whs if w["foreman_name"] == "Новый прораб"][0]
-    cab = post("/api/stock/categories", json={"name": "Кабель", "markup_pct": 40})
+    cab = post("/api/stock/categories", json={"name": "Кабель"})
     vvg = post("/api/stock/categories", json={"name": "ВВГнг-LS", "parent_id": cab["id"]})
-    p1 = post("/api/stock/products", json={"name": "ВВГнг-LS 3×2,5", "category_id": vvg["id"], "unit": "м", "min_qty": 300, "pack_qty": 100, "pack_name": "бухта"})
-    p2 = post("/api/stock/products", json={"name": "Подрозетник d68", "unit": "шт", "markup_pct": 60})
+    p1 = post("/api/stock/products", json={"name": "ВВГнг-LS 3×2,5", "category_id": vvg["id"], "unit": "м", "min_qty": 300, "pack_qty": 100, "pack_name": "бухта", "client_price": 121.8})
+    p2 = post("/api/stock/products", json={"name": "Подрозетник d68", "unit": "шт"})
     assert p1["category_path"] == "Кабель → ВВГнг-LS"
     # приход двумя партиями по разной цене → средняя
     post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-10", "supplier": "Кабель-Центр", "doc_number": "123",
@@ -120,7 +120,8 @@ with c:
     k = [x for x in prods if x["id"] == p1["id"]][0]
     st = k["stock"][str(wh["id"])]
     assert float(st["qty"]) == 600 and float(st["avg_cost"]) == 87.0, st   # (500*86+100*92)/600 = 87
-    assert float(k["price"]) == round(87 * 1.4, 2), k["price"]            # наценка из категории
+    assert float(k["price"]) == 121.8, k["price"]            # цена клиенту — только ручная
+    assert [x for x in prods if x["id"] == p2["id"]][0]["price"] is None
     assert any(x["name"] == "Гофра d20" for x in prods)
     # расход закупки записался
     ex = get("/api/expenses?month=2026-10"); assert any(e["category"] == "materials" and float(e["amount"]) == 500*86+200*9 for e in ex), ex

@@ -37,7 +37,7 @@ export async function render(main, r, state) {
     ${[...inStock, ...noStock].map(p => { const st = whSel ? (p.stock[whSel] || {}) : null; const qty = st ? Number(st.qty || 0) : Number(p.total_qty); const low = p.min_qty && qty < Number(p.min_qty);
       return `<tr class="${low ? 'low' : ''} ${qty <= 0 ? 'mute' : ''}"><td><a href="#" data-prod="${p.id}"><b>${esc(p.name)}</b></a><div class="small mute">${esc(p.category_path || 'без категории')}${p.sku ? ' · ' + esc(p.sku) : ''}${low ? ' · <span class="warn">ниже минимума ' + num(p.min_qty) + '</span>' : ''}</div></td>
         <td class="r num">${num(qty, 3)} ${esc(p.unit)}${p.pack_qty && qty > 0 ? `<div class="small mute">${num(qty / Number(p.pack_qty), 1)} ${esc(p.pack_name || 'уп.')}</div>` : ''}</td>
-        <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '—'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td>
+        <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn" title="Цена клиенту не задана — откройте позицию и укажите">—</span>'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td>
         <td class="r">${qty > 0 && whSel ? `<button class="btn s" data-issue="${p.id}">Списать</button>` : ''}</td></tr>`; }).join('')}</table>`
     : emptyState(prods.length ? 'Ничего не найдено' : 'Номенклатуры пока нет', prods.length ? 'Измените фильтр или поиск.' : 'Нажмите «Приход» — позиции можно создать прямо в накладной, или «Новая позиция».')}</div></div>`;
 
@@ -72,13 +72,13 @@ function newWarehouse(main, r) {
 
 function catForm(main, r, cat) {
   formModal({ title: cat ? 'Категория' : 'Новая категория', submit: cat ? 'Сохранить' : 'Создать',
-    fields: [{ name: 'name', label: 'Название', required: true, value: cat?.name || '' }, { name: 'parent_id', label: 'Внутри', type: 'combo', options: catOpts().filter(o => !cat || o.value !== cat.id), value: cat?.parent_id ?? (catSel || '') }, { name: 'markup_pct', label: 'Наценка по умолчанию, % (для цены клиенту)', type: 'number', step: '0.1', value: cat?.markup_pct ?? '' }],
+    fields: [{ name: 'name', label: 'Название', required: true, value: cat?.name || '' }, { name: 'parent_id', label: 'Внутри', type: 'combo', options: catOpts().filter(o => !cat || o.value !== cat.id), value: cat?.parent_id ?? (catSel || '') }],
     onSubmit: async (v) => { v.parent_id = v.parent_id ? Number(v.parent_id) : null; if (cat) await api.patch('/api/stock/categories/' + cat.id, v); else await api.post('/api/stock/categories', v); toast('Сохранено'); closeDrawer(); render(main, r, S); } });
 }
 
 function catsDrawer(main, r) {
-  const rows = (pid, d) => catChildren(pid).map(c => `<tr><td style="padding-left:${10 + d * 16}px">${esc(c.name)}<div class="small mute">${c.markup_pct !== null ? 'наценка ' + num(c.markup_pct) + '%' : ''}</div></td><td class="r"><button class="btn s" data-edit="${c.id}">изменить</button> <button class="btn s" data-del="${c.id}">×</button></td></tr>${rows(c.id, d + 1)}`).join('');
-  const d = openDrawer(`<h2>Категории</h2><p class="small mute">Любая вложенность: Кабель → ВВГнг-LS → 3×2,5. Наценка категории применяется к позициям без своей наценки.</p><table style="margin-top:8px">${rows(null, 0) || '<tr><td class="mute">Пусто</td></tr>'}</table><button class="btn s" style="margin-top:10px" data-new>+ категория</button>`);
+  const rows = (pid, d) => catChildren(pid).map(c => `<tr><td style="padding-left:${10 + d * 16}px">${esc(c.name)}</td><td class="r"><button class="btn s" data-edit="${c.id}">изменить</button> <button class="btn s" data-del="${c.id}">×</button></td></tr>${rows(c.id, d + 1)}`).join('');
+  const d = openDrawer(`<h2>Категории</h2><p class="small mute">Любая вложенность: Кабель → ВВГнг-LS → 3×2,5.</p><table style="margin-top:8px">${rows(null, 0) || '<tr><td class="mute">Пусто</td></tr>'}</table><button class="btn s" style="margin-top:10px" data-new>+ категория</button>`);
   d.querySelector('[data-new]').onclick = () => catForm(main, r, null);
   d.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => catForm(main, r, cats.find(c => c.id === Number(b.dataset.edit))));
   d.querySelectorAll('[data-del]').forEach(b => b.onclick = () => confirmModal('Удалить категорию?', async () => { await api.del('/api/stock/categories/' + b.dataset.del); closeDrawer(); render(main, r, S); }, 'Удалить'));
@@ -92,8 +92,7 @@ function prodFields(p) {
     { name: 'pack_qty', label: 'В упаковке (бухта 100 м → 100)', type: 'number', step: '0.001', value: p?.pack_qty ?? '' },
     { name: 'pack_name', label: 'Название упаковки', value: p?.pack_name || '', placeholder: 'бухта' },
     { name: 'min_qty', label: 'Минимальный остаток (уведомление «пора докупить»)', type: 'number', step: '0.001', value: p?.min_qty ?? '' },
-    { name: 'markup_pct', label: 'Наценка, % (пусто — из категории)', type: 'number', step: '0.1', value: p?.markup_pct ?? '' },
-    { name: 'client_price', label: 'Фиксированная цена клиенту, ₽ (перекрывает наценку)', type: 'number', step: '0.01', value: p?.client_price ?? '' },
+    { name: 'client_price', label: 'Цена клиенту, ₽', type: 'number', step: '0.01', value: p?.client_price ?? '' },
     { name: 'sku', label: 'Артикул', value: p?.sku || '' }, { name: 'note', label: 'Заметка', value: p?.note || '' },
   ];
 }
@@ -110,7 +109,7 @@ async function prodDrawer(main, r, pid) {
   const d = openDrawer(`<h2>${esc(p.name)}</h2><div class="small mute">${esc(p.category_path || 'без категории')} · ${esc(p.unit)}${p.pack_qty ? ' · ' + esc(p.pack_name || 'уп.') + ' ' + num(p.pack_qty) : ''}</div>
     <dl class="dl"><dt>Всего</dt><dd class="num">${num(p.total_qty, 3)} ${esc(p.unit)} · ${fmt(p.total_value)}</dd>
     ${whs.map(w => { const st = p.stock[w.id]; return st ? `<dt>${esc(w.name)}</dt><dd class="num">${num(st.qty, 3)} ${esc(p.unit)} · себест. ${num(st.avg_cost, 2)} ₽</dd>` : ''; }).join('')}
-    <dt>Клиенту</dt><dd>${p.price ? num(p.price, 2) + ' ₽' : '—'}${p.client_price ? ' (фикс.)' : p.markup_pct !== null ? ' (+' + num(p.markup_pct) + '%)' : ''}</dd>
+    <dt>Клиенту</dt><dd>${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn">не задана</span>'}</dd>
     <dt>Минимум</dt><dd>${p.min_qty ? num(p.min_qty) + ' ' + esc(p.unit) : '—'}</dd></dl>
     <div class="row"><button class="btn" data-edit>Изменить</button>${whSel && p.stock[whSel] ? `<button class="btn p" data-issue>Списать на объект</button>` : ''}<button class="btn" data-off>${p.is_active ? 'Скрыть' : 'Вернуть'}</button></div>
     <h3 style="margin-top:20px">Движения</h3><table style="margin-top:6px"><tr><th>Дата</th><th>Что</th><th class="r">Кол-во</th><th class="r">Цена</th></tr>
@@ -138,7 +137,7 @@ function receiptModal(main, r) {
     <div class="small mute" data-scan-status style="margin-top:4px"></div><form>
     <div class="fields2"><div class="field"><label>Склад</label><select name="warehouse_id">${whs.map(w => `<option value="${w.id}" ${w.id === whSel ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div><div class="field"><label>Дата</label><input name="date" type="date" value="${today()}"></div></div>
     <div class="fields2"><div class="field"><label>Поставщик</label><input name="supplier" placeholder="Кабель-Центр"></div><div class="field"><label>№ накладной</label><input name="doc_number"></div></div>
-    <table style="margin-top:12px" id="rc-lines"><tr><th>Позиция</th><th>Кол-во</th><th>Закупка, ₽</th><th>Клиенту, ₽ <span class="small mute" title="Пусто — цена клиенту считается по наценке категории/позиции. Заполните — станет фиксированной ценой позиции.">?</span></th><th></th></tr>${line(0)}${line(1)}${line(2)}</table>
+    <table style="margin-top:12px" id="rc-lines"><tr><th>Позиция</th><th>Кол-во</th><th>Закупка, ₽</th><th>Клиенту, ₽ <span class="small mute" title="Цена продажи клиенту — сохранится у позиции. Пусто — останется прежняя.">?</span></th><th></th></tr>${line(0)}${line(1)}${line(2)}</table>
     <button type="button" class="btn s" data-more style="margin-top:6px">+ строка</button>
     <div class="field"><label><input type="checkbox" name="add_expense" checked> Записать сумму закупки в расходы (категория «Закупка материалов»)</label></div>
     <div class="actions"><button type="button" class="btn" data-cancel>Отмена</button><button type="submit" class="btn p">Провести приход</button></div></form>`);
