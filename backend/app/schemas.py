@@ -254,6 +254,7 @@ class ObjectCreate(BaseModel):
 
 class ObjectUpdate(BaseModel):
     client_name: str | None = None
+    crew_sum_override: Decimal | None = None
     phone: str | None = None
     address: str | None = None
     area_m2: Decimal | None = None
@@ -282,7 +283,9 @@ class Finance(BaseModel):
     received: Decimal
     receivable: Decimal
     crew_share: Decimal                 # доля, напр. 0.55
-    crew_plan: Decimal
+    crew_calc: Decimal                  # расчёт по правилу (55 % от базы работ)
+    crew_plan: Decimal                  # сумма бригаде: override или crew_calc
+    crew_overridden: bool = False
     crew_paid: Decimal
     crew_due: Decimal
     crew_share_actual: Decimal | None   # фактическая доля выплат от базы работ

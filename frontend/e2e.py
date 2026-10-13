@@ -73,8 +73,19 @@ async def main():
         await pg.click("[data-next]"); await pg.wait_for_timeout(600)
         await pg.click("[data-next]"); await pg.wait_for_timeout(600)
         await shot("07-object-money")
+        # сумма бригаде по договорённости
+        await pg.click("[data-crewsum]"); await fill_modal({"amount": 60000})
+        t = await pg.locator(".ladder").inner_text(); assert "по договорённости" in t and ("60\u00a0000" in t or "60 000" in t), t
+        # три приложения разом
+        p1, p2, p3 = [f"{OUT}/app{i}.pdf" for i in (1, 2, 3)]
+        for x in (p1, p2, p3): open(x, "wb").write(b"%PDF-1.4 appendix")
+        await pg.click("#obj-docs [data-up]"); await pg.wait_for_selector(".modal.open")
+        await pg.locator(".modal.open [name=files]").set_input_files([p1, p2, p3])
+        await pg.locator(".modal.open [name=kind]").select_option("appendix")
+        await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached"); await pg.wait_for_timeout(600)
+        assert await pg.locator("#obj-docs .doc").count() == 4, "ожидалось КП + 3 приложения"
         txt = await pg.locator(".ladder").inner_text()
-        assert "66\u00a0000" in txt or "66 000" in txt, txt  # 55% от 120 000
+        assert "60\u00a0000" in txt or "60 000" in txt, txt  # 55% от 120 000
 
         await pg.goto(BASE + "/#/objects"); await pg.wait_for_selector("tr.click"); await shot("08-objects")
         await pg.goto(BASE + "/#/stats"); await pg.wait_for_selector(".kpi"); await pg.wait_for_timeout(300); await shot("09-stats")

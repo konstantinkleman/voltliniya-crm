@@ -93,3 +93,10 @@ with c:
     od = c.get(f"/api/objects/{obj['id']}").json(); assert od["foreman_name"] == "Новый прораб" and float(od["finance"]["foreman_share"]) == 150000
     fs = c.get("/api/stats/foremen?month=2026-10").json(); a = [x for x in fs if x["name"] == "Андрей К."][0]; assert a["objects_in_month"] == 1, fs
 print("REASSIGN OK")
+# сумма бригаде по договорённости
+with c:
+    od = c.post(f"/api/objects/{obj['id']}/crew-sum", json={"amount": 60000}).json()
+    f = od["finance"]; assert f["crew_overridden"] and float(f["crew_plan"]) == 60000 and float(f["crew_calc"]) == 69300 and float(f["crew_due"]) == 20000, f
+    od = c.post(f"/api/objects/{obj['id']}/crew-sum", json={"amount": None}).json()
+    f = od["finance"]; assert not f["crew_overridden"] and float(f["crew_plan"]) == 69300, f
+print("CREW SUM OK")

@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -95,6 +98,20 @@ def set_stage(oid: int, data: ObjectStage, user: m.User = Depends(current_user),
     db.commit()
     db.refresh(o)
     return object_out(db, o, full=user.is_director, detail=True)
+
+
+class CrewSumIn(BaseModel):
+    amount: Decimal | None = None  # null — вернуть расчёт по правилу
+
+
+@router.post("/{oid}/crew-sum", response_model=ObjectDetail)
+def set_crew_sum(oid: int, data: CrewSumIn, user: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Сумма бригаде по договорённости. null — снова считать 55 % от работ."""
+    o = _get(db, oid, user)
+    o.crew_sum_override = data.amount
+    db.commit()
+    db.refresh(o)
+    return object_out(db, o, full=True, detail=True)
 
 
 # ---------- платежи клиента ----------

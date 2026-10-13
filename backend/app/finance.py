@@ -94,13 +94,15 @@ def compute(db: Session, o: WorkObject, full: bool = True) -> Finance:
     works_base = q(o.works_sum + extra)
     total = q(works_base + o.materials_client_sum)
     received = q(sum((p.amount for p in o.payments), Decimal(0)))
-    crew_plan = q(works_base * share)
+    crew_calc = q(works_base * share)
+    crew_plan = q(o.crew_sum_override) if o.crew_sum_override is not None else crew_calc
     crew_paid = q(sum((p.amount for p in o.payouts), Decimal(0)))
     f = Finance(
         works_sum=q(o.works_sum), extra_works_sum=q(extra), works_base=works_base,
         materials_client_sum=q(o.materials_client_sum), contract_total=total,
         received=received, receivable=q(total - received),
-        crew_share=share, crew_plan=crew_plan, crew_paid=crew_paid, crew_due=q(crew_plan - crew_paid),
+        crew_share=share, crew_calc=crew_calc, crew_plan=crew_plan, crew_overridden=o.crew_sum_override is not None,
+        crew_paid=crew_paid, crew_due=q(crew_plan - crew_paid),
         crew_share_actual=(q(crew_paid / works_base) if works_base and crew_paid else None),
     )
     if not full:

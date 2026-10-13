@@ -18,6 +18,7 @@ for r in (auth.router, leads.router, objects.router, crews.router, expenses.rout
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(engine)
+    migrate()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     if settings.ADMIN_EMAIL and settings.ADMIN_PASSWORD:
         with SessionLocal() as db:
@@ -26,6 +27,23 @@ def startup():
                               password_hash=hash_password(settings.ADMIN_PASSWORD),
                               is_director=True, is_foreman=True))
                 db.commit()
+
+
+def migrate():
+    """Добавляет новые колонки в существующие таблицы (create_all этого не делает)."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    wanted = {
+        "objects": [("crew_sum_override", "NUMERIC(14,2)"), ("salary_foreman_id", "INTEGER")],
+    }
+    with engine.begin() as conn:
+        for table, cols in wanted.items():
+            if table not in insp.get_table_names():
+                continue
+            have = {c["name"] for c in insp.get_columns(table)}
+            for name, typ in cols:
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {typ}"))
 
 
 @app.get("/api/health")

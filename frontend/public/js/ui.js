@@ -51,7 +51,7 @@ export function formModal({ title, fields, submit = 'Сохранить', onSubm
       return `<div class="field"><label>${esc(f.label)}</label><select name="${esc(f.name)}" ${f.required ? 'required' : ''}>${opts}</select></div>`;
     }
     if (f.type === 'textarea') return `<div class="field"><label>${esc(f.label)}</label><textarea name="${esc(f.name)}" placeholder="${esc(f.placeholder || '')}">${esc(f.value ?? '')}</textarea></div>`;
-    if (f.type === 'file') return `<div class="field"><label>${esc(f.label)}</label><input type="file" name="${esc(f.name)}" ${f.accept ? `accept="${f.accept}"` : ''} ${f.required ? 'required' : ''} ${f.capture ? 'capture="environment"' : ''}></div>`;
+    if (f.type === 'file') return `<div class="field"><label>${esc(f.label)}</label><input type="file" name="${esc(f.name)}" ${f.accept ? `accept="${f.accept}"` : ''} ${f.required ? 'required' : ''} ${f.capture ? 'capture="environment"' : ''} ${f.multiple ? 'multiple' : ''}></div>`;
     return `<div class="field"><label>${esc(f.label)}</label><input type="${f.type || 'text'}" name="${esc(f.name)}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.required ? 'required' : ''} ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.inputmode ? `inputmode="${f.inputmode}"` : ''}></div>`;
   }).join('');
   const m = openModal(`<h2>${esc(title)}</h2>${intro ? `<p class="mute small" style="margin:6px 0 0">${intro}</p>` : ''}<form>${body}<div class="actions"><button type="button" class="btn" data-cancel>Отмена</button><button type="submit" class="btn p">${esc(submit)}</button></div></form>`);
@@ -64,7 +64,7 @@ export function formModal({ title, fields, submit = 'Сохранить', onSubm
     for (const f of fields) {
       const el = form.elements[f.name];
       if (!el) continue;
-      if (f.type === 'file') values[f.name] = el.files[0] || null;
+      if (f.type === 'file') values[f.name] = f.multiple ? Array.from(el.files) : (el.files[0] || null);
       else if (f.type === 'number') values[f.name] = el.value === '' ? null : Number(el.value);
       else values[f.name] = el.value === '' ? null : el.value;
     }

@@ -167,6 +167,8 @@ class WorkObject(Base, TimestampMixin):
     crew_id: Mapped[int | None] = mapped_column(ForeignKey("crews.id"))
     # кто вёл объект в месяце сделки — на него относится доля зарплаты, даже если бригаду потом переназначили
     salary_foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # договорённость с бригадой: если задана, заменяет расчётные 55 % (расчёт остаётся виден рядом)
+    crew_sum_override: Mapped[Decimal | None] = mapped_column(Money)
     start_date: Mapped[Date | None] = mapped_column(Date)
     end_date: Mapped[Date | None] = mapped_column(Date)
     works_sum: Mapped[Decimal] = mapped_column(Money, default=0)            # работы по смете

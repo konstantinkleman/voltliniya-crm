@@ -42,8 +42,14 @@ export function docsBlock(el, docs, owner, onChange, hint = '', { photos = false
   el.querySelector('[data-up]').onclick = () => formModal({ title: photos ? 'Добавить фото' : 'Загрузить документ', submit: 'Загрузить',
     fields: photos
       ? [{ name: 'file', label: 'Фото', type: 'file', accept: 'image/*', capture: true, required: true }, { name: 'title', label: 'Подпись', placeholder: 'День 3 — штробление' }]
-      : [{ name: 'file', label: 'Файл', type: 'file', required: true }, { name: 'kind', label: 'Тип', type: 'select', options: opt(KINDS), value: 'other' }, { name: 'title', label: 'Название (по умолчанию — имя файла)' }],
-    onSubmit: async (v) => { await uploadDoc(v.file, { ...owner, kind: photos ? 'photo' : v.kind, title: v.title || undefined }); toast('Загружено'); onChange(); } });
+      : [{ name: 'files', label: 'Файлы (можно выбрать несколько)', type: 'file', multiple: true, required: true }, { name: 'kind', label: 'Тип для всех выбранных', type: 'select', options: opt(KINDS), value: 'appendix' }, { name: 'title', label: 'Название (пусто — имя файла; при нескольких файлах — имена файлов)' }],
+    onSubmit: async (v) => {
+      if (photos) { await uploadDoc(v.file, { ...owner, kind: 'photo', title: v.title || undefined }); toast('Загружено'); onChange(); return; }
+      const files = v.files || [];
+      let n = 0;
+      for (const f of files) { await uploadDoc(f, { ...owner, kind: v.kind, title: (files.length === 1 && v.title) ? v.title : undefined }); n++; }
+      toast(n === 1 ? 'Загружено' : `Загружено файлов: ${n}`); onChange();
+    } });
 }
 
 // Миниатюры: грузим файл с токеном, подставляем blob-URL в <img>, клик — открыть в новой вкладке.
