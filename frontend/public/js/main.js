@@ -77,4 +77,6 @@ export async function render() {
 
 async function boot() { await render(); }
 window.addEventListener('hashchange', render);
+// на сервере вышло обновление — перезагрузимся при следующем переходе (api.js), а пока предупредим
+document.addEventListener('app-update', () => toast('Вышло обновление CRM — страница обновится при переходе в другой раздел'));
 boot();

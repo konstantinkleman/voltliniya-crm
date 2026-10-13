@@ -77,6 +77,10 @@ fi
 # 2b. Новые переменные в существующем .env (без перезаписи значений).
 grep -q '^OPENAI_API_KEY=' .env || printf '\n# Распознавание накладных по фото: вставьте ключ OpenAI и перезапустите deploy.sh\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-4o\n' >> .env
 
+# 2c. Версия сборки = хеш коммита: по ней открытые вкладки CRM понимают, что надо перезагрузиться.
+sed -i '/^APP_VERSION=/d' .env
+echo "APP_VERSION=$(git rev-parse --short HEAD 2>/dev/null || date +%s)" >> .env
+
 # 3. Сборка и запуск.
 docker compose up -d --build
 sleep 5

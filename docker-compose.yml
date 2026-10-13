@@ -28,6 +28,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      APP_VERSION: ${APP_VERSION:-}
     volumes:
       - uploads:/data/uploads
     depends_on:

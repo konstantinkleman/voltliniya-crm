@@ -14,6 +14,18 @@ app = FastAPI(title="ВольтЛиния CRM", docs_url="/api/docs", openapi_ur
 for r in (auth.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router, stock.router):
     app.include_router(r)
 
+# Версия сборки: deploy.sh кладёт короткий хеш коммита в APP_VERSION. Фронт сравнивает заголовок
+# в каждом ответе и перезагружает страницу, если на сервере вышло обновление (SPA иначе живёт со старым JS неделями).
+import time as _time
+APP_VERSION = os.environ.get("APP_VERSION") or f"dev-{int(_time.time())}"
+
+
+@app.middleware("http")
+async def add_version(request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-App-Version"] = APP_VERSION
+    return resp
+
 
 @app.on_event("startup")
 def startup():
@@ -55,4 +67,4 @@ def migrate():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "version": APP_VERSION}

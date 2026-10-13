@@ -8,6 +8,21 @@ export class ApiError extends Error {
   constructor(status, detail) { super(detail); this.status = status; }
 }
 
+// Версия сервера (заголовок X-App-Version). Страница-SPA не перезагружается сама по себе,
+// поэтому после deploy.sh старый JS может жить в открытой вкладке днями. Как только версия
+// в ответе меняется — перезагружаемся при ближайшем переходе (чтобы не потерять заполняемую форму).
+let serverVersion = null;
+export let updateAvailable = false;
+function checkVersion(r) {
+  const v = r.headers.get('X-App-Version'); if (!v) return;
+  if (serverVersion === null) { serverVersion = v; return; }
+  if (v !== serverVersion && !updateAvailable) {
+    updateAvailable = true;
+    window.addEventListener('hashchange', () => location.reload(), { once: true });
+    document.dispatchEvent(new CustomEvent('app-update'));
+  }
+}
+
 async function req(method, url, body, isForm) {
   const headers = {};
   const t = token.get();
@@ -15,6 +30,7 @@ async function req(method, url, body, isForm) {
   let payload = body;
   if (body && !isForm) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
   const r = await fetch(url, { method, headers, body: payload });
+  checkVersion(r);
   if (r.status === 401) { token.set(null); location.hash = '#/login'; throw new ApiError(401, 'Нужно войти'); }
   if (!r.ok) {
     let detail = r.statusText;
