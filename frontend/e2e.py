@@ -87,6 +87,30 @@ async def main():
         txt = await pg.locator(".ladder").inner_text()
         assert "60\u00a0000" in txt or "60 000" in txt, txt  # 55% от 120 000
 
+        # ---- склад: приход с новой позицией на лету, списание со склада в объект ----
+        await pg.goto(BASE + "/#/stock"); await pg.wait_for_selector("[data-receipt]"); await pg.wait_for_timeout(300)
+        await pg.click(".seg [data-wh]:has-text('Андрей')"); await pg.wait_for_timeout(400)   # приход на склад прораба объекта
+        await pg.click("[data-newcat]"); await fill_modal({"name": "Кабель", "markup_pct": 40})
+        await pg.click("[data-receipt]"); await pg.wait_for_selector(".modal.open form")
+        cat_id = await pg.locator(".modal.open [name=new_cat] option", has_text="Кабель").get_attribute("value"); await pg.select_option(".modal.open [name=new_cat]", cat_id); await pg.select_option(".modal.open [name=new_unit]", "м")
+        await pg.select_option(".modal.open [name=p0]", "new"); await pg.fill(".modal.open [name=n0]", "ВВГнг-LS 3×2,5"); await pg.fill(".modal.open [name=q0]", "500"); await pg.fill(".modal.open [name=c0]", "86")
+        await pg.select_option(".modal.open [name=p1]", "new"); await pg.fill(".modal.open [name=n1]", "Подрозетник d68"); await pg.fill(".modal.open [name=q1]", "200"); await pg.fill(".modal.open [name=c1]", "9")
+        await pg.fill(".modal.open [name=supplier]", "Кабель-Центр")
+        await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached"); await pg.wait_for_timeout(600)
+        await shot("08a-stock")
+        rows = await pg.locator(".wh table tr").count(); assert rows >= 3, "позиции не появились"
+        # второй склад (Андрея) и перемещение
+        await pg.click("[data-transfer]"); await pg.wait_for_selector(".modal.open")
+        await fill_modal({"qty": 100})
+        await pg.wait_for_timeout(400); await shot("08b-stock-transfer")
+        # списание из карточки объекта
+        await pg.goto(BASE + "/#/objects"); await pg.wait_for_selector("tr.click"); await pg.click("tr.click"); await pg.wait_for_selector("[data-mat-stock]")
+        await pg.click("[data-mat-stock]"); await pg.wait_for_selector(".modal.open")
+        opts = await pg.locator(".modal.open [name=product_id] option").all_text_contents(); assert any("ВВГнг" in o for o in opts), opts
+        await fill_modal({"qty": 210})
+        txt = await pg.locator(".card.pad:has(h2:text('Материалы на объекте'))").inner_text()
+        assert "со склада" in txt and ("18\u00a0060" in txt or "18 060" in txt), txt   # 210 * 86
+        await shot("08c-object-stock")
         await pg.goto(BASE + "/#/objects"); await pg.wait_for_selector("tr.click"); await shot("08-objects")
         await pg.goto(BASE + "/#/stats"); await pg.wait_for_selector(".kpi"); await pg.wait_for_timeout(300); await shot("09-stats")
         await pg.goto(BASE + "/#/settings"); await pg.wait_for_selector("table"); await shot("10-settings")
@@ -111,10 +135,17 @@ async def main():
             else: await el.fill(v)
         await m.click(".modal.open form [type=submit]"); await m.wait_for_selector(".modal.open", state="detached"); await m.wait_for_timeout(500)
         assert await m.locator("#fm-photos a").count() == 1, "фото не появилось"
-        await m.click("[data-mat]");
-        for k, v in {"name": "Подрозетники", "qty": "66", "unit": "шт"}.items(): await m.locator(f".modal.open form [name={k}]").fill(v)
-        await m.click(".modal.open form [type=submit]"); await m.wait_for_selector(".modal.open", state="detached"); await m.wait_for_timeout(400)
+        # прораб списывает подрозетники со своего склада
+        await m.click("[data-mat]"); await m.wait_for_selector(".modal.open form [name=product_id]")
+        opt = await m.locator(".modal.open [name=product_id] option", has_text="Подрозетник").get_attribute("value")
+        await m.locator(".modal.open [name=product_id]").select_option(opt); await m.locator(".modal.open [name=qty]").fill("66")
+        await m.click(".modal.open form [type=submit]"); await m.wait_for_selector(".modal.open", state="detached"); await m.wait_for_timeout(500)
+        t = await m.locator(".fm").inner_text(); assert "Подрозетник" in t and "594" in t, t   # 66 * 9
         await m.screenshot(path=f"{OUT}/13-foreman-after.png", full_page=True)
+        await m.goto(BASE + "/#/my/stock"); await m.wait_for_selector(".fm .pcard, .fm .empty"); await m.wait_for_timeout(300); await m.screenshot(path=f"{OUT}/13b-foreman-stock.png", full_page=True)
+        if await m.locator("[data-ok]").count():
+            await m.click("[data-ok]"); await m.wait_for_timeout(500)
+            t = await m.locator(".fm").inner_text(); assert "ВВГнг" in t and "100" in t, t
         await m.goto(BASE + "/#/my/money"); await m.wait_for_selector(".fm .pcard"); await m.wait_for_timeout(300); await m.screenshot(path=f"{OUT}/14-foreman-money.png", full_page=True)
         await b.close()
 

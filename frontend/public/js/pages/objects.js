@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { esc, fmt, num, pct, dateRu, dateTimeRu, srcClass, toast, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
 import { docsBlock } from './docs.js';
+import { stockIssueForObject } from './stockissue.js';
 
 let S, D;
 
@@ -93,9 +94,9 @@ async function renderOne(main, id) {
           <tr><td><b>Остаток бригаде</b></td><td class="r num"><b>${fmt(f.crew_due)}</b></td></tr></table></div>
     </div>
   </div>
-  <div class="card pad" style="margin-top:14px"><div class="row sp"><h2>Материалы на объекте</h2><button class="btn s" data-mat>+ списать</button></div>
+  <div class="card pad" style="margin-top:14px"><div class="row sp"><h2>Материалы на объекте</h2><div class="row"><button class="btn s p" data-mat-stock>Списать со склада</button><button class="btn s" data-mat-return>Вернуть на склад</button><button class="btn s" data-mat>+ вручную</button></div></div>
     <table style="margin-top:8px"><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Себестоимость</th><th></th></tr>
-      ${o.materials.map(m => `<tr><td>${esc(m.name)}<div class="small mute">${dateRu(m.date)}</div></td><td class="r num">${m.qty ? num(m.qty, 2) + ' ' + esc(m.unit || '') : '—'}</td><td class="r num">${fmt(m.cost_sum)}</td><td class="r"><button class="btn s" data-del-mat="${m.id}">×</button></td></tr>`).join('') || '<tr><td colspan="4" class="mute">Пока ничего не списано. В первой версии — суммами; складские списания появятся со складом.</td></tr>'}
+      ${o.materials.map(m => `<tr><td>${esc(m.name)}<div class="small mute">${dateRu(m.date)}</div></td><td class="r num">${m.qty ? num(m.qty, 2) + ' ' + esc(m.unit || '') : '—'}</td><td class="r num">${fmt(m.cost_sum)}</td><td class="r">${m.movement_id ? '<span class="small mute">со склада</span>' : `<button class="btn s" data-del-mat="${m.id}">×</button>`}</td></tr>`).join('') || '<tr><td colspan="4" class="mute">Пока ничего не списано. «Списать со склада» берёт себестоимость из склада прораба; «вручную» — для покупок мимо склада.</td></tr>'}
       <tr><td><b>Итого</b></td><td></td><td class="r num"><b>${fmt(f.materials_cost)}</b></td><td></td></tr></table></div>
   <div class="grid g2" style="margin-top:14px"><div class="card pad" id="obj-docs"></div><div class="card pad" id="obj-photos"></div></div>
   <div class="card pad" style="margin-top:14px"><h2>История этапов</h2><ul class="timeline">${o.stage_log.map(s => `<li>${esc(D.object_stage_names[s.stage])}<small>${dateTimeRu(s.created_at)}</small></li>`).join('')}</ul>${o.note ? `<p class="mute small">${esc(o.note)}</p>` : ''}</div>`;
@@ -137,7 +138,9 @@ async function renderOne(main, id) {
   main.querySelector('[data-extra]').onclick = () => formModal({ title: 'Дополнительные работы', intro: 'Оплаченные клиентом сверх сметы. Входят в базу для доли бригады.', submit: 'Добавить',
     fields: [{ name: 'title', label: 'Что сделали', required: true }, { name: 'amount', label: 'Сумма, ₽', type: 'number', required: true }, { name: 'date', label: 'Дата', type: 'date', value: today() }],
     onSubmit: async (v) => { await api.post(`/api/objects/${id}/extra-works`, v); reload(); } });
-  main.querySelector('[data-mat]').onclick = () => formModal({ title: 'Списать материал на объект', submit: 'Списать',
+  main.querySelector('[data-mat-stock]').onclick = () => stockIssueForObject(o, reload);
+  main.querySelector('[data-mat-return]').onclick = () => stockIssueForObject(o, reload, { returnMode: true });
+  main.querySelector('[data-mat]').onclick = () => formModal({ title: 'Списать материал на объект (вручную)', submit: 'Списать',
     fields: [{ name: 'name', label: 'Что', required: true, placeholder: 'ВВГнг-LS 3×2,5' }, { name: 'qty', label: 'Количество', type: 'number', step: '0.01' }, { name: 'unit', label: 'Ед.', value: 'м' }, { name: 'cost_sum', label: 'Себестоимость итого, ₽', type: 'number', required: true }, { name: 'date', label: 'Дата', type: 'date', value: today() }],
     onSubmit: async (v) => { await api.post(`/api/objects/${id}/materials`, v); toast('Списано'); reload(); } });
   const delBtn = (sel, url, text) => main.querySelectorAll(sel).forEach(b => b.onclick = () => confirmModal(text, async () => { await api.del(url(b.dataset[Object.keys(b.dataset)[0]])); reload(); }, 'Удалить'));

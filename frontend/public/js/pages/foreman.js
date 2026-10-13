@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { esc, fmt, num, dateRu, dateTimeRu, toast, formModal, confirmModal, emptyState, today } from '../ui.js';
 import { docsBlock, uploadDoc, loadThumbs } from './docs.js';
+import { stockIssueForObject } from './stockissue.js';
 
 let S, D;
 
@@ -15,12 +16,14 @@ export async function render(app, r, state) {
     <div id="fm-body"><div class="empty">Загрузка…</div></div></div>
     <nav class="fm-nav">
       <a href="#/my" class="${sub === 'objects' || sub === 'obj' ? 'on' : ''}"><b>▤</b>Объекты</a>
+      <a href="#/my/stock" class="${sub === 'stock' ? 'on' : ''}"><b>▦</b>Мой склад</a>
       <a href="#/my/money" class="${sub === 'money' ? 'on' : ''}"><b>₽</b>Деньги</a>
     </nav>`;
   const body = app.querySelector('#fm-body');
   try {
     if (objId) await renderObject(body, objId);
     else if (sub === 'money') await renderMoney(body);
+    else if (sub === 'stock') await renderStock(body);
     else await renderObjects(body);
   } catch (e) { body.innerHTML = `<div class="empty"><b>Не удалось загрузить</b>${esc(e.message)}</div>`; }
 }
@@ -47,7 +50,8 @@ async function renderObject(body, id) {
       <div class="small mute">${esc(D.object_stage_names[o.stage])}${o.stage_log.length ? ' · с ' + dateRu(o.stage_log[o.stage_log.length - 1].created_at) : ''}</div></div>
     <div class="big">
       <button class="p" data-photo>📷 Фото с объекта</button>
-      <button data-mat>Списать материал на объект</button>
+      <button data-mat>Списать со склада на объект</button>
+      <button data-mat-manual>Купил сам — записать вручную</button>
       ${next ? `<button data-next>Перевести на «${esc(D.object_stage_names[next])}»</button>` : ''}
     </div>
     <div class="pcard"><b>Смета работ</b><div class="small mute">${fmt(f.works_base)} работ · бригаде ${num(Number(f.crew_share) * 100)}% = ${fmt(f.crew_plan)}</div></div>
@@ -62,7 +66,8 @@ async function renderObject(body, id) {
   body.querySelector('[data-photo]').onclick = () => formModal({ title: 'Фото с объекта', submit: 'Загрузить',
     fields: [{ name: 'file', label: 'Снимок', type: 'file', accept: 'image/*', capture: true, required: true }, { name: 'title', label: 'Подпись', placeholder: 'День 3 — штробление', value: 'Фото ' + dateRu(new Date()) }],
     onSubmit: async (v) => { await uploadDoc(v.file, { object_id: id, kind: 'photo', title: v.title }); toast('Фото загружено'); reload(); } });
-  body.querySelector('[data-mat]').onclick = () => formModal({ title: 'Списать на объект', submit: 'Списать',
+  body.querySelector('[data-mat]').onclick = () => stockIssueForObject(o, reload);
+  body.querySelector('[data-mat-manual]').onclick = () => formModal({ title: 'Записать материал вручную', submit: 'Записать',
     fields: [{ name: 'name', label: 'Что', required: true, placeholder: 'ВВГнг-LS 3×2,5' }, { name: 'qty', label: 'Сколько', type: 'number', step: '0.01', inputmode: 'decimal' }, { name: 'unit', label: 'Ед.', value: 'м' }, { name: 'cost_sum', label: 'Себестоимость итого, ₽ (если знаете)', type: 'number', value: 0 }],
     onSubmit: async (v) => { v.date = today(); v.cost_sum = v.cost_sum || 0; await api.post(`/api/objects/${id}/materials`, v); toast('Списано'); reload(); } });
   body.querySelector('[data-next]')?.addEventListener('click', () => confirmModal(`Перевести объект на «${D.object_stage_names[next]}»?`, async () => { await api.post(`/api/objects/${id}/stage`, { stage: next }); toast('Этап переведён'); reload(); }, 'Перевести'));
@@ -78,4 +83,19 @@ async function renderMoney(body) {
     <div class="small mute" style="margin:14px 2px 8px">По объектам</div>
     ${objs.map(o => { const f = o.finance; return `<div class="pcard"><div class="row sp"><b>${esc(o.client_name)}</b><span class="num">${fmt(f.crew_plan)}</span></div><div class="small mute">выплачено ${fmt(f.crew_paid)} · остаток ${fmt(f.crew_due)}</div></div>`; }).join('') || '<div class="mute small">Объектов пока нет</div>'}
     <div class="infobox">Зарплата и дата её выплаты — у директора в разделе «Прорабы».</div>`;
+}
+
+
+async function renderStock(body) {
+  const whs = await api.get('/api/stock/warehouses');
+  const wh = whs[0];
+  if (!wh) { body.innerHTML = emptyState('Склада пока нет', 'Директор заведёт склад и проведёт первый приход.'); return; }
+  const [prods, pending] = await Promise.all([api.get('/api/stock/products?warehouse_id=' + wh.id), api.get('/api/stock/movements?warehouse_id=' + wh.id + '&kind=transfer_in')]);
+  const inc = pending.filter(m => !m.confirmed);
+  const mine = prods.filter(p => p.stock[wh.id] && Number(p.stock[wh.id].qty) > 0);
+  body.innerHTML = `<div class="small mute" style="margin:0 2px 8px">${esc(wh.name)} · ${mine.length} позиций</div>
+    ${inc.length ? `<div class="pcard" style="border-color:var(--warn)"><b>В пути · ${inc.length}</b>${inc.map(m => `<div class="row sp" style="margin-top:8px"><span>${esc(m.product_name)} · ${num(m.qty, 3)} ${esc(m.unit)}</span><button class="btn s p" data-ok="${m.id}">Получил</button></div>`).join('')}</div>` : ''}
+    ${mine.map(p => { const st = p.stock[wh.id]; const low = p.min_qty && Number(st.qty) < Number(p.min_qty); return `<div class="pcard"><div class="row sp"><b>${esc(p.name)}</b><span class="num">${num(st.qty, 3)} ${esc(p.unit)}</span></div><div class="small mute">${esc(p.category_path || '')}${low ? ' · <span class="warn">мало, надо докупить</span>' : ''}</div></div>`; }).join('') || '<div class="pcard mute">На складе пусто</div>'}
+    <div class="infobox">Списание на объект — из карточки объекта, кнопка «Списать со склада». Приход проводит директор.</div>`;
+  body.querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => { await api.post(`/api/stock/movements/${b.dataset.ok}/confirm`, {}); toast('Принято на склад'); renderStock(body); });
 }

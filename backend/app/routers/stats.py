@@ -90,7 +90,7 @@ def summary(month: str | None = None, _: m.User = Depends(director), db: Session
     payouts = sum((p.amount for p in db.scalars(select(m.CrewPayout).where(m.CrewPayout.date >= start, m.CrewPayout.date < end)).all()), Decimal(0))
     materials = sum((l.cost_sum for l in db.scalars(select(m.MaterialLine).where(m.MaterialLine.date >= start, m.MaterialLine.date < end)).all()), Decimal(0))
     exps = db.scalars(select(m.Expense).where(m.Expense.date >= start, m.Expense.date < end)).all()
-    by_type = {"channel": Decimal(0), "marketing": Decimal(0), "staff": Decimal(0), "operating": Decimal(0)}
+    by_type = {"channel": Decimal(0), "marketing": Decimal(0), "staff": Decimal(0), "operating": Decimal(0), "materials": Decimal(0)}
     for e in exps:
         t = m.EXPENSE_CATEGORIES.get(e.category, (None, "operating", None))[1]
         by_type[t] += e.amount
@@ -99,11 +99,16 @@ def summary(month: str | None = None, _: m.User = Depends(director), db: Session
     receivable = sum((compute(db, o, full=False).receivable for o in active), Decimal(0))
     fins_all = [compute(db, o) for o in objs]
     crew_due = sum((f.crew_due for f in fins_all), Decimal(0))
-    result = received - materials - payouts - by_type["staff"] - by_type["channel"] - by_type["marketing"] - by_type["operating"]
+    # по деньгам: закупка материалов — реальный расход месяца; списание на объекты — перенос себестоимости, в итог не входит.
+    # материалы, записанные на объект вручную (куплены мимо склада), считаем расходом — у них нет закупки.
+    manual_materials = sum((l.cost_sum for l in db.scalars(select(m.MaterialLine).where(
+        m.MaterialLine.date >= start, m.MaterialLine.date < end, m.MaterialLine.movement_id.is_(None))).all()), Decimal(0))
+    result = received - by_type["materials"] - manual_materials - payouts - by_type["staff"] - by_type["channel"] - by_type["marketing"] - by_type["operating"]
     return {
         "month": f"{y}-{mo:02d}",
         "received": q(received), "materials": q(materials), "crew_payouts": q(payouts),
         "staff": q(by_type["staff"]), "marketing": q(by_type["channel"] + by_type["marketing"]), "operating": q(by_type["operating"]),
+        "materials_purchased": q(by_type["materials"] + manual_materials),
         "result": q(result),
         "receivable": q(receivable), "crew_due": q(crew_due),
         "objects_active": len(active), "objects_total": len(objs),

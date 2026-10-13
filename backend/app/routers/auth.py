@@ -55,6 +55,9 @@ def create_user(data: UserCreate, _: m.User = Depends(director), db: Session = D
     u = m.User(email=email, name=data.name, password_hash=hash_password(data.password), phone=data.phone,
                is_director=data.is_director, is_foreman=data.is_foreman, salary=data.salary)
     db.add(u)
+    db.flush()
+    if u.is_foreman:
+        db.add(m.Warehouse(name=f"Склад {u.name}", foreman_id=u.id))
     db.commit()
     db.refresh(u)
     return u

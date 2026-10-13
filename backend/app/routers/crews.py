@@ -78,6 +78,11 @@ def reassign(cid: int, data: CrewReassign, _: m.User = Depends(director), db: Se
     if data.move_objects and old_id:
         for o in db.scalars(select(m.WorkObject).where(m.WorkObject.crew_id == c.id, m.WorkObject.stage.not_in(["act", "warranty"]))).all():
             o.foreman_id = new.id
+        # склад прежнего прораба переходит новому, если у нового своего склада нет
+        old_wh = db.scalar(select(m.Warehouse).where(m.Warehouse.foreman_id == old_id, m.Warehouse.is_active == True))  # noqa: E712
+        new_wh = db.scalar(select(m.Warehouse).where(m.Warehouse.foreman_id == new.id, m.Warehouse.is_active == True))  # noqa: E712
+        if old_wh and not new_wh:
+            old_wh.foreman_id = new.id; old_wh.name = f"Склад {new.name}"
     db.commit()
     db.refresh(c)
     return _out(c)

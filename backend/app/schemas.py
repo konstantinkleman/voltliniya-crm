@@ -229,6 +229,7 @@ class MaterialIn(BaseModel):
 
 class MaterialOut(ORM, MaterialIn):
     id: int
+    movement_id: int | None = None
 
 
 class StageLogOut(ORM):

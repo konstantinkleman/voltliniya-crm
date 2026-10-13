@@ -7,11 +7,11 @@ from . import models as m
 from .auth import hash_password
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, crews, documents, expenses, leads, objects, stats
+from .routers import auth, crews, documents, expenses, leads, objects, stats, stock
 
 app = FastAPI(title="ВольтЛиния CRM", docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router):
+for r in (auth.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router, stock.router):
     app.include_router(r)
 
 
@@ -23,10 +23,16 @@ def startup():
     if settings.ADMIN_EMAIL and settings.ADMIN_PASSWORD:
         with SessionLocal() as db:
             if not db.scalar(select(m.User).where(m.User.email == settings.ADMIN_EMAIL.lower())):
-                db.add(m.User(email=settings.ADMIN_EMAIL.lower(), name=settings.ADMIN_NAME,
-                              password_hash=hash_password(settings.ADMIN_PASSWORD),
-                              is_director=True, is_foreman=True))
+                u = m.User(email=settings.ADMIN_EMAIL.lower(), name=settings.ADMIN_NAME,
+                           password_hash=hash_password(settings.ADMIN_PASSWORD), is_director=True, is_foreman=True)
+                db.add(u); db.flush()
+                db.add(m.Warehouse(name=f"Склад {u.name}", foreman_id=u.id))
                 db.commit()
+            # склады для прорабов, созданных до появления складского модуля
+            for u in db.scalars(select(m.User).where(m.User.is_foreman == True, m.User.is_active == True)).all():  # noqa: E712
+                if not db.scalar(select(m.Warehouse).where(m.Warehouse.foreman_id == u.id)):
+                    db.add(m.Warehouse(name=f"Склад {u.name}", foreman_id=u.id))
+            db.commit()
 
 
 def migrate():
@@ -35,6 +41,7 @@ def migrate():
     insp = inspect(engine)
     wanted = {
         "objects": [("crew_sum_override", "NUMERIC(14,2)"), ("salary_foreman_id", "INTEGER")],
+        "material_lines": [("movement_id", "INTEGER")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

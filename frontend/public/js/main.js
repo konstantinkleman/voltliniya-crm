@@ -3,6 +3,7 @@ import { html, esc, toast } from './ui.js';
 import * as leads from './pages/leads.js';
 import * as objects from './pages/objects.js';
 import * as crews from './pages/crews.js';
+import * as stock from './pages/stock.js';
 import * as expenses from './pages/expenses.js';
 import * as stats from './pages/stats.js';
 import * as foreman from './pages/foreman.js';
@@ -12,10 +13,10 @@ export const state = { me: null, dicts: null };
 const app = document.getElementById('app');
 
 const NAV = [
-  ['leads', 'Заявки'], ['objects', 'Объекты'], ['crews', 'Прорабы и бригады'],
+  ['leads', 'Заявки'], ['objects', 'Объекты'], ['stock', 'Склад'], ['crews', 'Прорабы и бригады'],
   ['expenses', 'Расходы'], ['stats', 'Аналитика'], ['settings', 'Настройки'],
 ];
-const PAGES = { leads, objects, crews, expenses, stats, settings };
+const PAGES = { leads, objects, stock, crews, expenses, stats, settings };
 
 function route() {
   const h = location.hash.replace(/^#\/?/, '');

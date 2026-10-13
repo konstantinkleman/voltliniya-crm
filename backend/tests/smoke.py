@@ -100,3 +100,58 @@ with c:
     od = c.post(f"/api/objects/{obj['id']}/crew-sum", json={"amount": None}).json()
     f = od["finance"]; assert not f["crew_overridden"] and float(f["crew_plan"]) == 69300, f
 print("CREW SUM OK")
+
+# ---------- склад ----------
+with c:
+    whs = get("/api/stock/warehouses"); assert any(w["foreman_name"] == "Новый прораб" for w in whs), whs
+    wh = [w for w in whs if w["foreman_name"] == "Новый прораб"][0]
+    cab = post("/api/stock/categories", json={"name": "Кабель", "markup_pct": 40})
+    vvg = post("/api/stock/categories", json={"name": "ВВГнг-LS", "parent_id": cab["id"]})
+    p1 = post("/api/stock/products", json={"name": "ВВГнг-LS 3×2,5", "category_id": vvg["id"], "unit": "м", "min_qty": 300, "pack_qty": 100, "pack_name": "бухта"})
+    p2 = post("/api/stock/products", json={"name": "Подрозетник d68", "unit": "шт", "markup_pct": 60})
+    assert p1["category_path"] == "Кабель → ВВГнг-LS"
+    # приход двумя партиями по разной цене → средняя
+    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-10", "supplier": "Кабель-Центр", "doc_number": "123",
+        "lines": [{"product_id": p1["id"], "qty": 500, "unit_cost": 86}, {"product_id": p2["id"], "qty": 200, "unit_cost": 9}], "add_expense": True})
+    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-11",
+        "lines": [{"product_id": p1["id"], "qty": 100, "unit_cost": 92}, {"new_product": {"name": "Гофра d20", "unit": "м"}, "qty": 200, "unit_cost": 9.5}]})
+    prods = get(f"/api/stock/products?warehouse_id={wh['id']}")
+    k = [x for x in prods if x["id"] == p1["id"]][0]
+    st = k["stock"][str(wh["id"])]
+    assert float(st["qty"]) == 600 and float(st["avg_cost"]) == 87.0, st   # (500*86+100*92)/600 = 87
+    assert float(k["price"]) == round(87 * 1.4, 2), k["price"]            # наценка из категории
+    assert any(x["name"] == "Гофра d20" for x in prods)
+    # расход закупки записался
+    ex = get("/api/expenses?month=2026-10"); assert any(e["category"] == "materials" and float(e["amount"]) == 500*86+200*9 for e in ex), ex
+    # списание на объект → материалы объекта по средней
+    before = get(f"/api/objects/{obj['id']}")["finance"]["materials_cost"]
+    r = c.post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 1000, "object_id": obj["id"]}); assert r.status_code == 400
+    post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 210, "object_id": obj["id"], "date": "2026-10-12"})
+    od = get(f"/api/objects/{obj['id']}")
+    assert float(od["finance"]["materials_cost"]) == float(before) + 210 * 87, od["finance"]["materials_cost"]
+    assert any(ml["name"] == "ВВГнг-LS 3×2,5" and float(ml["cost_sum"]) == 210 * 87 for ml in od["materials"])
+    # возврат 10 м
+    post("/api/stock/return", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 10, "object_id": obj["id"]})
+    od = get(f"/api/objects/{obj['id']}"); assert float(od["finance"]["materials_cost"]) == float(before) + 200 * 87
+    k = [x for x in get(f"/api/stock/products?warehouse_id={wh['id']}") if x["id"] == p1["id"]][0]
+    assert float(k["stock"][str(wh["id"])]["qty"]) == 400
+    # перемещение на склад Андрея с подтверждением
+    wh2 = [w for w in whs if w["foreman_name"] == "Андрей К."][0]
+    mv = post("/api/stock/transfer", json={"from_warehouse_id": wh["id"], "to_warehouse_id": wh2["id"], "product_id": p1["id"], "qty": 100})
+    k2 = [x for x in get(f"/api/stock/products?warehouse_id={wh2['id']}") if x["id"] == p1["id"]][0]
+    assert str(wh2["id"]) not in k2["stock"], "до подтверждения на складе получателя быть не должно"
+    post(f"/api/stock/movements/{mv[1]['id']}/confirm", json={})
+    k2 = [x for x in get(f"/api/stock/products?warehouse_id={wh2['id']}") if x["id"] == p1["id"]][0]
+    assert float(k2["stock"][str(wh2["id"])]["qty"]) == 100 and float(k2["stock"][str(wh2["id"])]["avg_cost"]) == 87
+    # инвентаризация: факт 295 вместо 300
+    adj = post("/api/stock/adjust", json={"warehouse_id": wh["id"], "lines": [{"product_id": p1["id"], "actual_qty": 295}]})
+    assert len(adj) == 1 and float(adj[0]["qty"]) == -5
+    sm = get("/api/stock/summary"); assert len(sm["low"]) >= 1 and float(sm["total_value"]) > 0, sm
+    # прораб видит только свой склад и может списать на свой объект
+    c3 = TestClient(main.app)
+    r = c3.post("/api/auth/login", data={"username": "new@test.ru", "password": "secret123"}); c3.headers["Authorization"] = "Bearer " + r.json()["access_token"]
+    mine = c3.get("/api/stock/warehouses").json(); assert len(mine) == 1 and mine[0]["id"] == wh["id"]
+    assert c3.get(f"/api/stock/products?warehouse_id={wh2['id']}").status_code == 403
+    r = c3.post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p2["id"], "qty": 66, "object_id": obj["id"]}); assert r.status_code == 200, r.text
+    assert c3.post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-12", "lines": []}).status_code == 403
+print("STOCK OK")

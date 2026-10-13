@@ -5,7 +5,7 @@ import { monthPicker } from './crews.js';
 export async function render(main, r, state) {
   const D = state.dicts;
   const month = r.q.get('month') || monthKey();
-  const [sm, ch, fs] = await Promise.all([api.get('/api/stats/summary?month=' + month), api.get('/api/stats/channels?month=' + month), api.get('/api/stats/foremen?month=' + month)]);
+  const [sm, ch, fs, st] = await Promise.all([api.get('/api/stats/summary?month=' + month), api.get('/api/stats/channels?month=' + month), api.get('/api/stats/foremen?month=' + month), api.get('/api/stock/summary')]);
   const T = ch.reduce((a, c) => { for (const k of ['spent', 'leads', 'contacted', 'measured', 'offered', 'won', 'lost', 'revenue', 'profit']) a[k] = (a[k] || 0) + Number(c[k]); return a; }, {});
   const resNeg = Number(sm.result) < 0;
   main.innerHTML = `<div class="head"><div><h1>Аналитика</h1><p>${monthName(month)} · всё считается из заявок, объектов и расходов</p></div>${monthPicker(month)}</div>
@@ -24,7 +24,7 @@ export async function render(main, r, state) {
   <div class="grid g2">
     <div class="card pad"><h2>Деньги за месяц</h2><table style="margin-top:8px">
       <tr><td>Получено от клиентов</td><td class="r num">${fmt(sm.received)}</td></tr>
-      <tr><td>Материалы по себестоимости</td><td class="r num">−${fmt(sm.materials)}</td></tr>
+      <tr><td>Закупка материалов <span class="small mute">списано на объекты: ${fmt(sm.materials)}</span></td><td class="r num">−${fmt(sm.materials_purchased)}</td></tr>
       <tr><td>Выплаты бригадам</td><td class="r num">−${fmt(sm.crew_payouts)}</td></tr>
       <tr><td>Зарплата прорабов</td><td class="r num">−${fmt(sm.staff)}</td></tr>
       <tr><td>Маркетинг</td><td class="r num">−${fmt(sm.marketing)}</td></tr>
@@ -33,7 +33,8 @@ export async function render(main, r, state) {
       ${resNeg && Number(sm.receivable) > 0 ? `<div class="warnbox">Минус отчасти потому, что клиенты ещё должны ${fmt(sm.receivable)} по объектам в работе.</div>` : ''}</div>
     <div class="card pad"><h2>Прорабы</h2><table style="margin-top:8px"><tr><th>Прораб</th><th class="r">Объектов</th><th class="r">ЗП на объект</th><th class="r">Долг бригаде</th></tr>
       ${fs.filter(f => f.objects_total || f.salary).map(f => `<tr><td>${esc(f.name)}</td><td class="r num">${f.objects_in_month}</td><td class="r num">${f.salary_per_object ? fmt(f.salary_per_object) : '—'}</td><td class="r num ${Number(f.crew_due) > 0 ? 'copper' : ''}">${fmt(f.crew_due)}</td></tr>`).join('') || '<tr><td colspan="4" class="mute">—</td></tr>'}</table>
-      <div class="infobox">Склад (остатки, стоимость, обороты) появится во втором модуле.</div></div>
+      <h2 style="margin-top:18px">Склад</h2><table style="margin-top:8px">${st.by_warehouse.map(w => `<tr><td>${esc(w.name)}</td><td class="r num">${fmt(w.value)}</td></tr>`).join('')}<tr><td><b>Остатки на складах</b></td><td class="r num"><b>${fmt(st.total_value)}</b></td></tr><tr><td>Списано на объекты за месяц</td><td class="r num">${fmt(sm.materials)}</td></tr><tr><td>Ниже минимума</td><td class="r num ${st.low.length ? 'warn' : ''}">${st.low.length} поз.</td></tr>${st.pending_transfers ? `<tr><td>Перемещений в пути</td><td class="r num">${st.pending_transfers}</td></tr>` : ''}</table>
+      ${st.low.length ? `<div class="warnbox">Докупить: ${st.low.slice(0, 5).map(l => esc(l.product) + ' (' + num(l.qty) + ' из ' + num(l.min_qty) + ' ' + esc(l.unit) + ')').join(', ')}${st.low.length > 5 ? ' и ещё ' + (st.low.length - 5) : ''}</div>` : ''}</div>
   </div>`;
   main.querySelector('[data-month]').onchange = (e) => location.hash = '#/stats?month=' + e.target.value;
 }

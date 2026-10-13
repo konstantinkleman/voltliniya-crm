@@ -57,6 +57,7 @@ EXPENSE_CATEGORIES = {
     "calltracking": ("Коллтрекинг и телефония", "marketing", None),
     "salary": ("Зарплата прораба", "staff", None),
     "staff_other": ("Персонал прочее", "staff", None),
+    "materials": ("Закупка материалов", "materials", None),
     "tools": ("Инструмент", "operating", None),
     "transport": ("Транспорт", "operating", None),
     "warehouse_rent": ("Аренда склада", "operating", None),
@@ -218,6 +219,7 @@ class MaterialLine(Base):
     cost_sum: Mapped[Decimal] = mapped_column(Money, default=0)  # себестоимость, итого
     date: Mapped[Date | None] = mapped_column(Date)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    movement_id: Mapped[int | None] = mapped_column(ForeignKey("stock_movements.id"))  # если списано со склада
     object: Mapped["WorkObject"] = relationship(back_populates="materials")
 
 
@@ -281,4 +283,78 @@ class Document(Base):
 
     lead: Mapped["Lead | None"] = relationship(back_populates="documents", foreign_keys=[lead_id])
     object: Mapped["WorkObject | None"] = relationship(back_populates="documents", foreign_keys=[object_id])
+    user: Mapped["User | None"] = relationship()
+
+
+# ======================= СКЛАД =======================
+
+class Warehouse(Base, TimestampMixin):
+    """Склад прораба. Главного склада нет: приход сразу на склад конкретного прораба."""
+    __tablename__ = "warehouses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    address: Mapped[str | None] = mapped_column(String(300))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    foreman: Mapped["User | None"] = relationship()
+
+
+class Category(Base):
+    """Дерево категорий любой глубины: Кабель → ВВГнг-LS → 3×2,5."""
+    __tablename__ = "categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), index=True)
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+    markup_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))  # наценка по умолчанию для позиций категории
+    parent: Mapped["Category | None"] = relationship(remote_side=[id])
+
+
+class Product(Base, TimestampMixin):
+    __tablename__ = "products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(300), index=True)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), index=True)
+    unit: Mapped[str] = mapped_column(String(20), default="шт")
+    sku: Mapped[str | None] = mapped_column(String(100))
+    pack_qty: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))   # бухта 100 м → 100
+    pack_name: Mapped[str | None] = mapped_column(String(50))           # «бухта»
+    markup_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))   # наценка позиции (перекрывает категорию)
+    client_price: Mapped[Decimal | None] = mapped_column(Money)          # фиксированная цена клиенту (перекрывает наценку)
+    min_qty: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))     # минимальный остаток (на склад)
+    note: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    category: Mapped["Category | None"] = relationship()
+
+
+MOVEMENT_KINDS = {
+    "receipt": "Приход", "issue": "Списание на объект", "return": "Возврат с объекта",
+    "transfer_out": "Перемещение (отправлено)", "transfer_in": "Перемещение (получено)",
+    "adjust": "Инвентаризация", "import": "Начальный остаток",
+}
+
+
+class StockMovement(Base):
+    """Проводка: любое изменение остатка. Остаток = сумма qty по складу и позиции."""
+    __tablename__ = "stock_movements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    qty: Mapped[Decimal] = mapped_column(Numeric(12, 3))               # + приход, − расход
+    unit_cost: Mapped[Decimal] = mapped_column(Money, default=0)       # себестоимость за единицу на момент проводки
+    date: Mapped[Date] = mapped_column(Date, index=True)
+    object_id: Mapped[int | None] = mapped_column(ForeignKey("objects.id"), index=True)
+    supplier: Mapped[str | None] = mapped_column(String(200))
+    doc_number: Mapped[str | None] = mapped_column(String(100))        # номер накладной
+    batch: Mapped[str | None] = mapped_column(String(40), index=True)  # группирует строки одного прихода/перемещения
+    counterpart_id: Mapped[int | None] = mapped_column(ForeignKey("stock_movements.id"))  # парная проводка перемещения
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=True)     # перемещение «в пути» = не подтверждено получателем
+    note: Mapped[str | None] = mapped_column(Text)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    warehouse: Mapped["Warehouse"] = relationship()
+    product: Mapped["Product"] = relationship()
+    object: Mapped["WorkObject | None"] = relationship()
     user: Mapped["User | None"] = relationship()
