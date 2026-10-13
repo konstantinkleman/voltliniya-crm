@@ -123,10 +123,11 @@ async function prodDrawer(main, r, pid) {
 function receiptModal(main, r) {
   const wh = whs.find(w => w.id === whSel);
   const prodOpts = () => `<option value="">— выбрать —</option>${prods.map(p => `<option value="${p.id}">${esc(p.name)} (${esc(p.unit)})</option>`).join('')}<option value="new">+ новая позиция…</option>`;
-  const line = (i) => `<tr data-line="${i}"><td><select name="p${i}" style="width:100%;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)">${prodOpts()}</select><input name="n${i}" class="hidden" placeholder="Название новой позиции" style="width:100%;margin-top:4px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></td>
+  const line = (i, hint = '') => `<tr data-line="${i}"><td>${hint}<select name="p${i}" style="width:100%;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)">${prodOpts()}</select><input name="n${i}" class="hidden" placeholder="Название новой позиции" style="width:100%;margin-top:4px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></td>
     <td><input name="q${i}" type="number" step="0.001" inputmode="decimal" placeholder="кол-во" style="width:90px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></td>
     <td><input name="c${i}" type="number" step="0.01" inputmode="decimal" placeholder="цена" style="width:90px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></td></tr>`;
-  const m = openModal(`<h2>Приход на ${esc(wh?.name || 'склад')}</h2><form>
+  const m = openModal(`<div class="row sp"><h2>Приход на ${esc(wh?.name || 'склад')}</h2>${D.invoice_ai ? `<label class="btn s p" style="cursor:pointer">📷 По фото накладной<input type="file" accept="image/*,application/pdf" capture="environment" data-scan class="hidden"></label>` : ''}</div>
+    <div class="small mute" data-scan-status style="margin-top:4px"></div><form>
     <div class="fields2"><div class="field"><label>Склад</label><select name="warehouse_id">${whs.map(w => `<option value="${w.id}" ${w.id === whSel ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div><div class="field"><label>Дата</label><input name="date" type="date" value="${today()}"></div></div>
     <div class="fields2"><div class="field"><label>Поставщик</label><input name="supplier" placeholder="Кабель-Центр"></div><div class="field"><label>№ накладной</label><input name="doc_number"></div></div>
     <div class="fields2"><div class="field"><label>Категория для новых позиций</label><select name="new_cat">${catOpts().map(o => `<option value="${o.value}" ${String(o.value) === String(catSel || '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div><div class="field"><label>Единица для новых позиций</label><select name="new_unit">${unitOpts.map(u => `<option value="${u.value}">${u.label}</option>`).join('')}</select></div></div>
@@ -139,6 +140,45 @@ function receiptModal(main, r) {
   const bind = () => m.querySelectorAll('select[name^=p]').forEach(sel => sel.onchange = () => { const i = sel.name.slice(1); m.querySelector(`[name=n${i}]`).classList.toggle('hidden', sel.value !== 'new'); });
   bind();
   m.querySelector('[data-more]').onclick = () => { m.querySelector('#rc-lines').insertAdjacentHTML('beforeend', line(n++)); bind(); };
+  const scan = m.querySelector('[data-scan]');
+  if (scan) scan.onchange = async () => {
+    const file = scan.files[0]; if (!file) return;
+    const status = m.querySelector('[data-scan-status]');
+    status.textContent = 'Распознаю накладную… обычно 10–30 секунд'; scan.disabled = true;
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const res = await api.upload('/api/stock/recognize', fd);
+      const f = m.querySelector('form');
+      if (res.supplier && !f.supplier.value) f.supplier.value = res.supplier;
+      if (res.doc_number && !f.doc_number.value) f.doc_number.value = res.doc_number;
+      if (res.date && /^\d{4}-\d{2}-\d{2}$/.test(res.date)) f.date.value = res.date;
+      // очищаем пустые строки и заполняем распознанными
+      const tbl = m.querySelector('#rc-lines');
+      tbl.querySelectorAll('tr[data-line]').forEach(tr => { const i = tr.dataset.line; if (!f[`p${i}`].value && !f[`q${i}`].value) tr.remove(); });
+      let matched = 0;
+      for (const ln of res.lines) {
+        const i = n++;
+        const hint = `<div class="small ${ln.product_id ? 'ok' : 'warn'}" style="margin-bottom:3px">${esc(ln.name)}${ln.product_id ? ' → найдено' : ln.candidates.length ? ' → выберите или создайте' : ' → новая позиция'}</div>`;
+        tbl.insertAdjacentHTML('beforeend', line(i, hint));
+        m.querySelector(`tr[data-line="${i}"]`).dataset.unit = ln.unit || '';
+        const sel = m.querySelector(`[name=p${i}]`);
+        if (ln.product_id) { sel.value = String(ln.product_id); matched++; }
+        else {
+          // варианты — наверх списка
+          for (const c of [...ln.candidates].reverse()) { const o = sel.querySelector(`option[value="${c.id}"]`); if (o) { o.textContent = `≈ ${c.name} (${c.unit})`; sel.insertBefore(o, sel.options[1]); } }
+          sel.value = ln.candidates.length ? '' : 'new';
+          m.querySelector(`[name=n${i}]`).value = ln.name;
+          m.querySelector(`[name=n${i}]`).classList.toggle('hidden', sel.value !== 'new');
+        }
+        m.querySelector(`[name=q${i}]`).value = Number(ln.qty) || '';
+        m.querySelector(`[name=c${i}]`).value = Number(ln.unit_cost) || '';
+      }
+      if (res.lines.length && res.lines[0].unit) f.new_unit.value = res.lines[0].unit;
+      bind();
+      status.textContent = res.lines.length ? `Распознано строк: ${res.lines.length}, сопоставлено с номенклатурой: ${matched}. Проверьте количество и цены перед проведением.` : 'Строки не распознаны — попробуйте более чёткое фото или введите вручную.';
+    } catch (err) { status.textContent = ''; toast(err.message, true); }
+    finally { scan.disabled = false; scan.value = ''; }
+  };
   m.querySelector('[data-cancel]').onclick = closeModal;
   m.querySelector('form').onsubmit = async (e) => {
     e.preventDefault(); const f = e.target; const lines = [];
@@ -146,7 +186,7 @@ function receiptModal(main, r) {
       const sel = f[`p${i}`]; if (!sel) continue;
       const qty = Number(f[`q${i}`].value), cost = Number(f[`c${i}`].value);
       if (!sel.value || !qty) continue;
-      if (sel.value === 'new') { const name = f[`n${i}`].value.trim(); if (!name) return toast('Укажите название новой позиции', true); lines.push({ new_product: { name, unit: f.new_unit.value, category_id: f.new_cat.value ? Number(f.new_cat.value) : null }, qty, unit_cost: cost }); }
+      if (sel.value === 'new') { const name = f[`n${i}`].value.trim(); if (!name) return toast('Укажите название новой позиции', true); const tr = sel.closest('tr'); const unit = tr.dataset.unit || f.new_unit.value; lines.push({ new_product: { name, unit, category_id: f.new_cat.value ? Number(f.new_cat.value) : null }, qty, unit_cost: cost }); }
       else lines.push({ product_id: Number(sel.value), qty, unit_cost: cost });
     }
     if (!lines.length) return toast('Заполните хотя бы одну строку', true);

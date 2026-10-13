@@ -391,3 +391,4 @@ class Dictionaries(BaseModel):
     expense_categories: dict[str, dict]
     doc_kinds: dict[str, str]
     crew_share: Decimal
+    invoice_ai: bool = False

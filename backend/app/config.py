@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = ""
     ADMIN_NAME: str = "Директор"
     MAX_UPLOAD_MB: int = 50
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
 
 
 settings = Settings()

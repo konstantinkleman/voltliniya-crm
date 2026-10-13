@@ -56,6 +56,9 @@ ADMIN_EMAIL=$ADMIN_EMAIL
 ADMIN_PASSWORD=$ADM
 ADMIN_NAME=Константин
 CREW_SHARE=0.55
+# Распознавание накладных по фото: вставьте ключ OpenAI и перезапустите deploy.sh
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o
 HTTP_PORT=80
 HTTPS_PORT=443
 EOF
@@ -70,6 +73,9 @@ EOF
   echo "=============================================="
   echo
 fi
+
+# 2b. Новые переменные в существующем .env (без перезаписи значений).
+grep -q '^OPENAI_API_KEY=' .env || printf '\n# Распознавание накладных по фото: вставьте ключ OpenAI и перезапустите deploy.sh\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-4o\n' >> .env
 
 # 3. Сборка и запуск.
 docker compose up -d --build

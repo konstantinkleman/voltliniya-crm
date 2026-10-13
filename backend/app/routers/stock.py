@@ -2,13 +2,15 @@ import uuid
 from datetime import date as Date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models as m
 from .. import stock as S
+from .. import invoice_ai
+from ..config import settings
 from ..auth import current_user, director
 from ..db import get_db
 
@@ -452,6 +454,17 @@ def post_adjust(data: AdjustIn, user: m.User = Depends(director), db: Session = 
     for mv in out:
         db.refresh(mv)
     return [_mv_out(x) for x in out]
+
+
+@router.post("/recognize")
+async def recognize_invoice(file: UploadFile = File(...), _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Фото/PDF накладной → строки с привязкой к номенклатуре. Ничего не проводит — только предлагает."""
+    data = await file.read()
+    if len(data) > settings.MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, "Файл слишком большой")
+    res = invoice_ai.recognize(data, file.content_type or "image/jpeg")
+    res["lines"] = invoice_ai.match_products(db, res["lines"])
+    return res
 
 
 @router.get("/summary")

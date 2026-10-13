@@ -32,7 +32,7 @@ def dictionaries(_: m.User = Depends(current_user)):
         lost_reasons=m.LOST_REASONS, object_stages=m.OBJECT_STAGES, object_stage_names=m.OBJECT_STAGE_NAMES,
         tariffs=m.TARIFFS, project_kinds=m.PROJECT_KINDS, pay_methods=m.PAY_METHODS,
         expense_categories={k: {"name": v[0], "type": v[1], "channel": v[2]} for k, v in m.EXPENSE_CATEGORIES.items()},
-        doc_kinds=m.DOC_KINDS, crew_share=settings.CREW_SHARE,
+        doc_kinds=m.DOC_KINDS, crew_share=settings.CREW_SHARE, invoice_ai=bool(settings.OPENAI_API_KEY),
     )
 
 
