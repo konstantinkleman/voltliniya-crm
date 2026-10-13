@@ -40,7 +40,7 @@ docker compose up -d --build
 
 1. В Авито: бизнес-профиль, подписка «Расширенный» (в Услугах Messenger API доступен с неё), ключи API в разделе «Интеграции» → `AVITO_CLIENT_ID`, `AVITO_CLIENT_SECRET` в `.env`.
 2. Придумать `AVITO_WEBHOOK_SECRET` (длинная случайная строка). Адрес вебхука: `https://crm.voltliniya.ru/api/avito/webhook/<секрет>`.
-3. Telegram: токен бота и свой chat_id → `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+3. Telegram: тот же бот, что шлёт заявки с сайта (`@Voltliniya_zayavki_bot`, chat_id 838171850); `deploy.sh` берёт токен из `/opt/tg-relay/.env` на VDS и дописывает в `.env` сам.
 4. `ANTHROPIC_API_KEY` для бота. `AVITO_BOT_ENABLED=0` — бот не отвечает, только заносит и уведомляет.
 5. `docker compose up -d --build`, затем в CRM: Настройки → Авито → «Подписать» (вебхук) и «Проверить» (Telegram).
 

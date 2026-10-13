@@ -71,6 +71,23 @@ EOF
   echo
 fi
 
+# 2a. Авито и Telegram: дописать недостающие ключи в существующий .env (повторный запуск ничего не перезапишет).
+#     Токен Telegram берётся из релея заявок с сайта (/opt/tg-relay/.env) — тот же бот @Voltliniya_zayavki_bot.
+addkey() { grep -q "^$1=" .env || printf '%s=%s\n' "$1" "$2" >> .env; }
+TG_TOK=""
+[ -f /opt/tg-relay/.env ] && TG_TOK=$(grep '^TG_TOKEN=' /opt/tg-relay/.env | cut -d= -f2-)
+addkey TELEGRAM_BOT_TOKEN "$TG_TOK"
+addkey TELEGRAM_CHAT_ID "838171850"
+addkey AVITO_WEBHOOK_SECRET "$(head -c 48 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 40 || true)"
+addkey AVITO_BOT_ENABLED "1"
+addkey AVITO_CLIENT_ID ""
+addkey AVITO_CLIENT_SECRET ""
+addkey ANTHROPIC_API_KEY ""
+addkey ANTHROPIC_MODEL "claude-sonnet-5-5"
+for k in AVITO_CLIENT_ID AVITO_CLIENT_SECRET ANTHROPIC_API_KEY TELEGRAM_BOT_TOKEN; do
+  grep -q "^$k=.\+" .env || echo "ВНИМАНИЕ: в .env пусто $k — впишите значение и повторите: docker compose up -d --build"
+done
+
 # 3. Сборка и запуск.
 docker compose up -d --build
 sleep 5
