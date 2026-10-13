@@ -26,8 +26,37 @@ PROMPT = """Ты распознаёшь товарную накладную (У�
 """
 
 
+MAX_SIDE = 2000  # px — для распознавания накладной достаточно, а запрос в 3–5 раз легче
+
+
+def _to_jpeg(data: bytes) -> bytes:
+    """Любой формат (HEIC с iPhone, TIFF, BMP, PNG, WebP) → JPEG до 2000 px по длинной стороне, с учётом EXIF-поворота."""
+    import io
+    from PIL import Image, ImageOps
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except ImportError:
+        pass
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        raise HTTPException(400, "Не удалось прочитать изображение. Поддерживаются фото JPEG/PNG/HEIC/WebP и PDF")
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    w, h = img.size
+    if max(w, h) > MAX_SIDE:
+        k = MAX_SIDE / max(w, h)
+        img = img.resize((int(w * k), int(h * k)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88, optimize=True)
+    return buf.getvalue()
+
+
 def _image_parts(data: bytes, mime: str) -> list[dict]:
-    """Фото → одна картинка; PDF → первые 3 страницы как картинки."""
+    """Фото → JPEG; PDF → первые 3 страницы как JPEG."""
     if mime == "application/pdf" or data[:4] == b"%PDF":
         try:
             import pypdfium2 as pdfium
@@ -36,15 +65,14 @@ def _image_parts(data: bytes, mime: str) -> list[dict]:
         pdf = pdfium.PdfDocument(data)
         parts = []
         for i in range(min(len(pdf), 3)):
+            import io
             page = pdf[i]
             img = page.render(scale=2).to_pil()
-            import io
             buf = io.BytesIO(); img.save(buf, format="JPEG", quality=85)
-            parts.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), "detail": "high"}})
+            parts.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(_to_jpeg(buf.getvalue())).decode(), "detail": "high"}})
         return parts
-    if not mime.startswith("image/"):
-        mime = "image/jpeg"
-    return [{"type": "image_url", "image_url": {"url": f"data:{mime};base64," + base64.b64encode(data).decode(), "detail": "high"}}]
+    jpeg = _to_jpeg(data)
+    return [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode(), "detail": "high"}}]
 
 
 def recognize(data: bytes, mime: str) -> dict:
