@@ -54,6 +54,16 @@ h1{font-size:22px}h2{font-size:16px}h3{font-size:14px}
 .field label{font-size:12px;color:var(--mute);font-weight:600}
 .field input,.field select,.field textarea{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);width:100%}
 .field textarea{min-height:70px;resize:vertical}
+.combo{position:relative;display:flex;align-items:center;min-width:0}
+.combo .combo-in{width:100%;padding:8px 26px 8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);text-overflow:ellipsis}
+.combo.open .combo-in{border-color:var(--act)}
+.combo .combo-arr{position:absolute;right:9px;pointer-events:none;color:var(--mute);font-size:11px}
+.combo-list{position:fixed;z-index:1000;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:4px}
+.combo-it{padding:7px 10px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.combo-it.act,.combo-it:hover{background:var(--act-soft)}
+.combo-it.sel{font-weight:600}
+.combo-it.new{color:var(--act)}
+tr.grp td{background:var(--bg);padding-top:8px;padding-bottom:4px}
 .fields2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:3px}
 .seg button{border:0;background:none;padding:6px 12px;border-radius:6px;font-weight:600;color:var(--ink2)}

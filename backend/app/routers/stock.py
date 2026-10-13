@@ -317,6 +317,7 @@ class ReceiptLine(BaseModel):
     new_product: ProductIn | None = None   # создать позицию на лету
     qty: Decimal
     unit_cost: Decimal = Decimal(0)
+    client_price: Decimal | None = None    # задать/обновить фиксированную цену клиенту у позиции
 
 
 class ReceiptIn(BaseModel):
@@ -340,6 +341,10 @@ def post_receipt(data: ReceiptIn, user: m.User = Depends(director), db: Session 
             p = m.Product(**ln.new_product.model_dump()); db.add(p); db.flush(); pid = p.id
         if not pid:
             raise HTTPException(400, "В строке не указана позиция")
+        if ln.client_price is not None:
+            p = db.get(m.Product, pid)
+            if p:
+                p.client_price = ln.client_price if ln.client_price > 0 else None
         lines.append({"product_id": pid, "qty": ln.qty, "unit_cost": ln.unit_cost})
     batch = uuid.uuid4().hex[:12]
     mvs = S.receipt(db, warehouse_id=data.warehouse_id, lines=lines, date=data.date, supplier=data.supplier,
@@ -355,39 +360,55 @@ def post_receipt(data: ReceiptIn, user: m.User = Depends(director), db: Session 
     return [_mv_out(x) for x in mvs]
 
 
-class IssueIn(BaseModel):
-    warehouse_id: int
+class IssueLine(BaseModel):
     product_id: int
     qty: Decimal
+
+
+class IssueIn(BaseModel):
+    """Одна позиция (product_id + qty) или несколько (lines) — одним документом."""
+    warehouse_id: int
     object_id: int
+    product_id: int | None = None
+    qty: Decimal | None = None
+    lines: list[IssueLine] = []
     date: Date | None = None
     note: str | None = None
 
+    def all_lines(self) -> list[IssueLine]:
+        out = list(self.lines)
+        if self.product_id and self.qty:
+            out.insert(0, IssueLine(product_id=self.product_id, qty=self.qty))
+        if not out:
+            raise HTTPException(400, "Не указаны позиции")
+        if any(l.qty <= 0 for l in out):
+            raise HTTPException(400, "Количество должно быть больше нуля")
+        return out
 
-@router.post("/issue", response_model=MovementOut)
-def post_issue(data: IssueIn, user: m.User = Depends(current_user), db: Session = Depends(get_db)):
+
+def _issue_common(data: IssueIn, user: m.User, db: Session, fn) -> list[MovementOut]:
     _check_wh_access(db, user, data.warehouse_id)
     o = db.get(m.WorkObject, data.object_id)
     if not o:
         raise HTTPException(404, "Объект не найден")
     if not user.is_director and o.foreman_id != user.id:
         raise HTTPException(403, "Это не ваш объект")
-    mv = S.issue(db, warehouse_id=data.warehouse_id, product_id=data.product_id, qty=data.qty, object_id=data.object_id,
-                 date=data.date or Date.today(), note=data.note, user_id=user.id)
-    db.commit(); db.refresh(mv)
-    return _mv_out(mv)
+    mvs = [fn(db, warehouse_id=data.warehouse_id, product_id=l.product_id, qty=l.qty, object_id=data.object_id,
+              date=data.date or Date.today(), note=data.note, user_id=user.id) for l in data.all_lines()]
+    db.commit()
+    for mv in mvs:
+        db.refresh(mv)
+    return [_mv_out(mv) for mv in mvs]
 
 
-@router.post("/return", response_model=MovementOut)
+@router.post("/issue", response_model=list[MovementOut])
+def post_issue(data: IssueIn, user: m.User = Depends(current_user), db: Session = Depends(get_db)):
+    return _issue_common(data, user, db, S.issue)
+
+
+@router.post("/return", response_model=list[MovementOut])
 def post_return(data: IssueIn, user: m.User = Depends(current_user), db: Session = Depends(get_db)):
-    _check_wh_access(db, user, data.warehouse_id)
-    o = db.get(m.WorkObject, data.object_id)
-    if not o or (not user.is_director and o.foreman_id != user.id):
-        raise HTTPException(403, "Это не ваш объект")
-    mv = S.return_from_object(db, warehouse_id=data.warehouse_id, product_id=data.product_id, qty=data.qty,
-                              object_id=data.object_id, date=data.date or Date.today(), note=data.note, user_id=user.id)
-    db.commit(); db.refresh(mv)
-    return _mv_out(mv)
+    return _issue_common(data, user, db, S.return_from_object)
 
 
 class TransferIn(BaseModel):

@@ -114,8 +114,9 @@ with c:
     post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-10", "supplier": "Кабель-Центр", "doc_number": "123",
         "lines": [{"product_id": p1["id"], "qty": 500, "unit_cost": 86}, {"product_id": p2["id"], "qty": 200, "unit_cost": 9}], "add_expense": True})
     post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-11",
-        "lines": [{"product_id": p1["id"], "qty": 100, "unit_cost": 92}, {"new_product": {"name": "Гофра d20", "unit": "м"}, "qty": 200, "unit_cost": 9.5}]})
+        "lines": [{"product_id": p1["id"], "qty": 100, "unit_cost": 92}, {"new_product": {"name": "Гофра d20", "unit": "м"}, "qty": 200, "unit_cost": 9.5, "client_price": 15}]})
     prods = get(f"/api/stock/products?warehouse_id={wh['id']}")
+    g = [x for x in prods if x["name"] == "Гофра d20"][0]; assert float(g["price"]) == 15 and float(g["client_price"]) == 15, g  # цена клиенту из прихода
     k = [x for x in prods if x["id"] == p1["id"]][0]
     st = k["stock"][str(wh["id"])]
     assert float(st["qty"]) == 600 and float(st["avg_cost"]) == 87.0, st   # (500*86+100*92)/600 = 87
@@ -154,4 +155,17 @@ with c:
     assert c3.get(f"/api/stock/products?warehouse_id={wh2['id']}").status_code == 403
     r = c3.post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p2["id"], "qty": 66, "object_id": obj["id"]}); assert r.status_code == 200, r.text
     assert c3.post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-12", "lines": []}).status_code == 403
+    # списание нескольких позиций одним документом; категория в материалах объекта
+    g = [x for x in get(f"/api/stock/products?warehouse_id={wh['id']}") if x["name"] == "Гофра d20"][0]
+    r = post("/api/stock/issue", json={"warehouse_id": wh["id"], "object_id": obj["id"], "lines": [{"product_id": p1["id"], "qty": 5}, {"product_id": g["id"], "qty": 20}]})
+    assert len(r) == 2
+    assert c.post("/api/stock/issue", json={"warehouse_id": wh["id"], "object_id": obj["id"], "lines": [{"product_id": p1["id"], "qty": 5}, {"product_id": g["id"], "qty": 99999}]}).status_code == 400
+    od = get(f"/api/objects/{obj['id']}")
+    assert any(ml["name"] == "ВВГнг-LS 3×2,5" and ml["category_path"] == "Кабель → ВВГнг-LS" for ml in od["materials"]), od["materials"]
+    # у прораба несколько бригад: объект требует явного выбора
+    cA = post("/api/crews", json={"name": "Бригада А", "foreman_id": f2["id"]}); cB = post("/api/crews", json={"name": "Бригада Б", "foreman_id": f2["id"]})
+    o2 = post("/api/objects", json={"client_name": "Два", "works_sum": 100000, "foreman_id": f2["id"]}); assert o2["crew_id"] is None
+    o2 = post("/api/objects", json={"client_name": "Три", "works_sum": 100000, "foreman_id": f2["id"], "crew_id": cB["id"]}); assert o2["crew_name"] == "Бригада Б"
+    assert c.post("/api/objects", json={"client_name": "Чужая", "works_sum": 1, "foreman_id": me["id"], "crew_id": cB["id"]}).status_code == 400
+    o2 = c.patch(f"/api/objects/{o2['id']}", json={"crew_id": cA["id"]}).json(); assert o2["crew_name"] == "Бригада А"
 print("STOCK OK")

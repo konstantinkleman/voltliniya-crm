@@ -114,11 +114,9 @@ def convert(lid: int, data: LeadConvert, user: m.User = Depends(director), db: S
     lead = _get(db, lid)
     if lead.object_id:
         raise HTTPException(400, "Объект уже создан")
+    from .objects import _crew_for
     foreman_id = data.foreman_id
-    crew_id = None
-    if foreman_id:
-        crew = db.scalar(select(m.Crew).where(m.Crew.foreman_id == foreman_id, m.Crew.is_active == True))  # noqa: E712
-        crew_id = crew.id if crew else None
+    crew_id = _crew_for(db, foreman_id, data.crew_id)
     obj = m.WorkObject(
         client_name=lead.name, phone=lead.phone, address=lead.address, area_m2=lead.area_m2,
         tariff=data.tariff or lead.tariff, source=lead.source, foreman_id=foreman_id, crew_id=crew_id, salary_foreman_id=foreman_id,

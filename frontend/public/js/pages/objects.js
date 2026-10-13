@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { esc, fmt, num, pct, dateRu, dateTimeRu, srcClass, toast, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
+import { crewField, bindCrewFilter, esc, fmt, num, pct, dateRu, dateTimeRu, srcClass, toast, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
 import { docsBlock } from './docs.js';
 import { stockIssueForObject } from './stockissue.js';
 
@@ -26,6 +26,17 @@ export async function render(main, r, state) {
   main.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => location.hash = '#/objects/' + tr.dataset.id);
 }
 
+// материалы объекта, сгруппированные по категории склада (ручные — в «Прочее / вручную»)
+function materialsRows(mats) {
+  if (!mats.length) return '<tr><td colspan="4" class="mute">Пока ничего не списано. «Списать со склада» берёт себестоимость из склада прораба; «вручную» — для покупок мимо склада.</td></tr>';
+  const groups = new Map();
+  for (const m of mats) { const k = m.movement_id ? (m.category_path || 'Без категории') : 'Вручную (мимо склада)'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); }
+  const keys = [...groups.keys()].sort((a, b) => (a.startsWith('Вручную') - b.startsWith('Вручную')) || (a === 'Без категории') - (b === 'Без категории') || a.localeCompare(b, 'ru'));
+  return keys.map(k => { const rows = groups.get(k).sort((a, b) => a.name.localeCompare(b.name, 'ru')); const sum = rows.reduce((t, m) => t + Number(m.cost_sum), 0);
+    return `<tr class="grp"><td colspan="2"><b class="small">${esc(k)}</b></td><td class="r num small mute">${fmt(sum)}</td><td></td></tr>` +
+      rows.map(m => `<tr><td style="padding-left:18px">${esc(m.name)}<div class="small mute">${dateRu(m.date)}</div></td><td class="r num">${m.qty ? num(m.qty, 2) + ' ' + esc(m.unit || '') : '—'}</td><td class="r num">${fmt(m.cost_sum)}</td><td class="r">${m.movement_id ? '<span class="small mute">со склада</span>' : `<button class="btn s" data-del-mat="${m.id}">×</button>`}</td></tr>`).join(''); }).join('');
+}
+
 function crewShareCell(f) {
   const over = Number(f.crew_paid) > Number(f.crew_plan) + 0.5;
   const v = f.crew_share_actual !== null ? num(Number(f.crew_share_actual) * 100) + '%' : num(Number(f.crew_share) * 100) + '% план';
@@ -33,8 +44,8 @@ function crewShareCell(f) {
 }
 
 async function newObject() {
-  const foremen = await api.get('/api/foremen');
-  formModal({ title: 'Новый объект', submit: 'Создать',
+  const [foremen, crews] = await Promise.all([api.get('/api/foremen'), api.get('/api/crews')]);
+  const m = formModal({ title: 'Новый объект', submit: 'Создать',
     fields: [
       { name: 'client_name', label: 'Клиент', required: true }, { name: 'phone', label: 'Телефон' }, { name: 'address', label: 'Адрес' },
       { name: 'area_m2', label: 'Площадь, м²', type: 'number', step: '0.1' },
@@ -43,9 +54,11 @@ async function newObject() {
       { name: 'works_sum', label: 'Работы по смете, ₽', type: 'number', required: true },
       { name: 'materials_client_sum', label: 'Материалы для клиента, ₽', type: 'number', value: 0 },
       { name: 'foreman_id', label: 'Прораб', type: 'select', options: [{ value: '', label: '— назначить позже —' }, ...foremen.map(f => ({ value: f.id, label: f.name }))] },
+      crewField(crews),
       { name: 'start_date', label: 'Дата старта', type: 'date', value: today() }, { name: 'contract_number', label: 'Номер договора' },
     ],
-    onSubmit: async (v) => { v.foreman_id = v.foreman_id ? Number(v.foreman_id) : null; const o = await api.post('/api/objects', v); toast('Объект создан'); location.hash = '#/objects/' + o.id; } });
+    onSubmit: async (v) => { v.foreman_id = v.foreman_id ? Number(v.foreman_id) : null; v.crew_id = v.crew_id ? Number(v.crew_id) : null; const o = await api.post('/api/objects', v); toast('Объект создан'); location.hash = '#/objects/' + o.id; } });
+  bindCrewFilter(m, crews);
 }
 
 async function renderOne(main, id) {
@@ -67,7 +80,7 @@ async function renderOne(main, id) {
   main.innerHTML = `
   <div class="head"><div><a class="btn s" href="#/objects">← Объекты</a><h1 style="margin-top:8px">${esc(o.client_name)}</h1>
     <p>${esc(o.address || 'адрес не указан')}${o.area_m2 ? ' · ' + num(o.area_m2) + ' м²' : ''}${o.tariff ? ' · ' + esc(o.tariff) : ''} · ${o.foreman_name ? 'прораб ' + esc(o.foreman_name) + (o.crew_name ? ', ' + esc(o.crew_name) : '') : '<span class="warn">прораб не назначен</span>'}${o.contract_number ? ' · договор № ' + esc(o.contract_number) : ''}</p></div>
-    <div class="row"><button class="btn" data-foreman>${o.foreman_id ? 'Сменить прораба' : 'Назначить прораба'}</button><button class="btn" data-edit>Изменить</button>${idx < stages.length - 1 ? `<button class="btn p" data-next>Следующий этап: ${esc(D.object_stage_names[stages[idx + 1]])}</button>` : ''}</div></div>
+    <div class="row"><button class="btn" data-foreman>${o.foreman_id ? 'Прораб / бригада' : 'Назначить прораба'}</button><button class="btn" data-edit>Изменить</button>${idx < stages.length - 1 ? `<button class="btn p" data-next>Следующий этап: ${esc(D.object_stage_names[stages[idx + 1]])}</button>` : ''}</div></div>
   <div class="card"><div class="stepper">${stages.map((s, i) => `<button class="step ${i < idx ? 'done' : i === idx ? 'cur' : ''}" data-stage="${s}" title="Перевести на этот этап">${esc(D.object_stage_names[s])}</button>`).join('')}</div></div>
   <div class="grid g2" style="margin-top:14px">
     <div class="card pad"><h2>Прибыль объекта</h2>
@@ -96,7 +109,7 @@ async function renderOne(main, id) {
   </div>
   <div class="card pad" style="margin-top:14px"><div class="row sp"><h2>Материалы на объекте</h2><div class="row"><button class="btn s p" data-mat-stock>Списать со склада</button><button class="btn s" data-mat-return>Вернуть на склад</button><button class="btn s" data-mat>+ вручную</button></div></div>
     <table style="margin-top:8px"><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Себестоимость</th><th></th></tr>
-      ${o.materials.map(m => `<tr><td>${esc(m.name)}<div class="small mute">${dateRu(m.date)}</div></td><td class="r num">${m.qty ? num(m.qty, 2) + ' ' + esc(m.unit || '') : '—'}</td><td class="r num">${fmt(m.cost_sum)}</td><td class="r">${m.movement_id ? '<span class="small mute">со склада</span>' : `<button class="btn s" data-del-mat="${m.id}">×</button>`}</td></tr>`).join('') || '<tr><td colspan="4" class="mute">Пока ничего не списано. «Списать со склада» берёт себестоимость из склада прораба; «вручную» — для покупок мимо склада.</td></tr>'}
+      ${materialsRows(o.materials)}
       <tr><td><b>Итого</b></td><td></td><td class="r num"><b>${fmt(f.materials_cost)}</b></td><td></td></tr></table></div>
   <div class="grid g2" style="margin-top:14px"><div class="card pad" id="obj-docs"></div><div class="card pad" id="obj-photos"></div></div>
   <div class="card pad" style="margin-top:14px"><h2>История этапов</h2><ul class="timeline">${o.stage_log.map(s => `<li>${esc(D.object_stage_names[s.stage])}<small>${dateTimeRu(s.created_at)}</small></li>`).join('')}</ul>${o.note ? `<p class="mute small">${esc(o.note)}</p>` : ''}</div>`;
@@ -108,10 +121,11 @@ async function renderOne(main, id) {
   main.querySelector('[data-next]')?.addEventListener('click', () => setStage(id, stages[idx + 1], reload));
   main.querySelectorAll('[data-stage]').forEach(b => b.onclick = () => { if (b.dataset.stage !== o.stage) setStage(id, b.dataset.stage, reload); });
   main.querySelector('[data-foreman]').onclick = async () => {
-    const foremen = await api.get('/api/foremen');
-    formModal({ title: 'Назначить прораба', intro: 'Бригада подставится автоматически — та, что закреплена за прорабом.',
-      fields: [{ name: 'foreman_id', label: 'Прораб', type: 'select', options: foremen.map(f => ({ value: f.id, label: f.name })), value: o.foreman_id || '' }],
-      onSubmit: async (v) => { await api.patch('/api/objects/' + id, { foreman_id: Number(v.foreman_id) }); toast('Прораб назначен'); reload(); } });
+    const [foremen, crews] = await Promise.all([api.get('/api/foremen'), api.get('/api/crews')]);
+    const m = formModal({ title: 'Прораб и бригада', intro: 'Если у прораба одна бригада, она подставится сама; если несколько — выберите.',
+      fields: [{ name: 'foreman_id', label: 'Прораб', type: 'select', options: foremen.map(f => ({ value: f.id, label: f.name })), value: o.foreman_id || '' }, crewField(crews, o.crew_id || '')],
+      onSubmit: async (v) => { await api.patch('/api/objects/' + id, { foreman_id: Number(v.foreman_id), crew_id: v.crew_id ? Number(v.crew_id) : null }); toast('Прораб назначен'); reload(); } });
+    bindCrewFilter(m, crews);
   };
   main.querySelector('[data-edit]').onclick = () => formModal({ title: 'Изменить объект',
     fields: [

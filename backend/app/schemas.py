@@ -179,6 +179,7 @@ class LeadConvert(BaseModel):
     materials_client_sum: Decimal = Decimal(0)
     tariff: str | None = None
     foreman_id: int | None = None
+    crew_id: int | None = None
     start_date: Date | None = None
     contract_number: str | None = None
 
@@ -230,6 +231,7 @@ class MaterialIn(BaseModel):
 class MaterialOut(ORM, MaterialIn):
     id: int
     movement_id: int | None = None
+    category_path: str | None = None   # категория позиции склада (для списанных со склада)
 
 
 class StageLogOut(ORM):
@@ -246,6 +248,7 @@ class ObjectCreate(BaseModel):
     tariff: str | None = None
     source: str | None = None
     foreman_id: int | None = None
+    crew_id: int | None = None
     start_date: Date | None = None
     works_sum: Decimal = Decimal(0)
     materials_client_sum: Decimal = Decimal(0)
@@ -262,6 +265,7 @@ class ObjectUpdate(BaseModel):
     tariff: str | None = None
     source: str | None = None
     foreman_id: int | None = None
+    crew_id: int | None = None
     start_date: Date | None = None
     end_date: Date | None = None
     works_sum: Decimal | None = None

@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { esc, fmt, num, dateRu, dateTimeRu, srcClass, toast, openDrawer, closeDrawer, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
+import { crewField, bindCrewFilter, esc, fmt, num, dateRu, dateTimeRu, srcClass, toast, openDrawer, closeDrawer, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
 import { docsBlock, uploadDoc } from './docs.js';
 
 let S, D;
@@ -108,25 +108,27 @@ async function openLead(id) {
     ],
     onSubmit: async (v) => { await api.patch('/api/leads/' + id, v); toast('Сохранено'); refresh(id); } });
   d.querySelector('[data-convert]')?.addEventListener('click', async () => {
-    const foremen = await api.get('/api/foremen');
-    formModal({ title: 'Договор подписан', submit: 'Создать объект',
+    const [foremen, crews] = await Promise.all([api.get('/api/foremen'), api.get('/api/crews')]);
+    const m = formModal({ title: 'Договор подписан', submit: 'Создать объект',
       intro: 'Заявка станет объектом, документы переедут в него. Суммы — из Приложения 1.',
       fields: [
         { name: 'works_sum', label: 'Работы по смете, ₽', type: 'number', required: true, value: l.offer_sum ? '' : '' },
         { name: 'materials_client_sum', label: 'Материалы для клиента по смете, ₽', type: 'number', value: 0 },
         { name: 'tariff', label: 'Тариф', type: 'select', options: opt(Object.fromEntries(D.tariffs.map(t => [t, t]))), value: l.tariff || 'Стандарт' },
         { name: 'foreman_id', label: 'Прораб', type: 'select', options: [{ value: '', label: '— назначить позже —' }, ...foremen.map(f => ({ value: f.id, label: f.name }))] },
+        crewField(crews),
         { name: 'start_date', label: 'Дата старта', type: 'date', value: today() },
         { name: 'contract_number', label: 'Номер договора' },
         { name: 'file', label: 'Файл договора (можно позже)', type: 'file' },
       ],
       onSubmit: async (v) => {
         if (v.file) await uploadDoc(v.file, { lead_id: id, kind: 'contract', title: 'Договор' + (v.contract_number ? ' № ' + v.contract_number : '') });
-        v.foreman_id = v.foreman_id ? Number(v.foreman_id) : null;
+        v.foreman_id = v.foreman_id ? Number(v.foreman_id) : null; v.crew_id = v.crew_id ? Number(v.crew_id) : null;
         delete v.file;
         const o = await api.post(`/api/leads/${id}/convert`, v);
         toast('Объект создан'); closeDrawer(); location.hash = '#/objects/' + o.id;
       } });
+    bindCrewFilter(m, crews);
   });
 }
 

@@ -13,10 +13,10 @@ export async function render(main, r, state) {
   const stat = (id) => stats.find(s => s.id === id) || {};
   main.innerHTML = `<div class="head"><div><h1>Прорабы и бригады</h1><p>Бригада получает ${num(Number(D.crew_share) * 100)}% от стоимости работ через прораба. Прораб — на зарплате</p></div>
     <div class="row">${monthPicker(month)}<button class="btn" data-new-crew>Новая бригада</button><button class="btn p" data-new-foreman>Новый прораб</button></div></div>
-    ${fm.map(u => { const s = stat(u.id); const crew = crews.find(c => c.foreman_id === u.id && c.is_active); const salary = expenses.filter(e => e.foreman_id === u.id); return `
+    ${fm.map(u => { const s = stat(u.id); const myCrews = crews.filter(c => c.foreman_id === u.id && c.is_active); const salary = expenses.filter(e => e.foreman_id === u.id); return `
     <div class="card pad" style="margin-bottom:14px">
       <div class="row sp"><div><h2>${esc(u.name)}${u.is_director ? ' <span class="tag">директор</span>' : ''}${!u.is_active ? ' <span class="tag warn">неактивен</span>' : ''}</h2>
-        <div class="mute small">${u.salary ? 'зарплата ' + fmt(u.salary) + '/мес' : '<span class="warn">зарплата не указана</span>'} · ${crew ? esc(crew.name) : '<span class="warn">без бригады</span>'} · ${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</div></div>
+        <div class="mute small">${u.salary ? 'зарплата ' + fmt(u.salary) + '/мес' : '<span class="warn">зарплата не указана</span>'} · ${myCrews.length ? (myCrews.length > 1 ? 'бригады: ' : '') + myCrews.map(c => esc(c.name)).join(', ') : '<span class="warn">без бригады</span>'} · ${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}</div></div>
         <div class="row"><button class="btn s" data-salary="${u.id}">Выплатить зарплату</button><button class="btn s" data-edit-user="${u.id}">Изменить</button></div></div>
       <div class="grid g4" style="margin-top:14px;grid-template-columns:repeat(5,1fr)">
         <div class="kpi"><div class="l">Объектов в ${monthName(month).split(' ')[0]}</div><div class="v">${s.objects_in_month ?? 0}</div><div class="d">всего ${s.objects_total ?? 0}</div></div>
@@ -27,7 +27,7 @@ export async function render(main, r, state) {
       </div>
       ${salary.length ? `<details style="margin-top:10px"><summary class="small mute" style="cursor:pointer">Журнал зарплаты · ${salary.length}</summary><table style="margin-top:6px"><tr><th>Дата</th><th>За месяц</th><th>Способ</th><th class="r">Сумма</th></tr>${salary.slice(0, 12).map(e => `<tr><td class="num">${dateRu(e.date)}</td><td>${e.period ? monthName(e.period) : '—'}</td><td>${esc(D.pay_methods[e.method] || e.method || '—')}</td><td class="r num">${fmt(e.amount)}</td></tr>`).join('')}</table></details>` : ''}
     </div>`; }).join('') || emptyState('Прорабов пока нет', 'Заведите прораба — он получит вход в мобильный кабинет.')}
-    <div class="card pad"><div class="row sp"><h2>Бригады</h2><span class="small mute">бригада закреплена за одним прорабом, он её старший</span></div>
+    <div class="card pad"><div class="row sp"><h2>Бригады</h2><span class="small mute">бригада закреплена за одним прорабом; у прораба может быть несколько бригад</span></div>
       <table style="margin-top:10px"><tr><th>Бригада</th><th>Прораб</th><th>С какого времени</th><th></th></tr>
       ${crews.map(c => { const cur = c.history.find(h => !h.to_date); const past = c.history.filter(h => h.to_date); return `<tr><td><b>${esc(c.name)}</b>${c.members_count ? ` <span class="small mute">${c.members_count} чел.</span>` : ''}${!c.is_active ? ' <span class="tag warn">расформирована</span>' : ''}${past.length ? `<div class="small mute">ранее: ${past.map(h => esc(h.foreman_name || '—') + ' до ' + dateRu(h.to_date)).join(', ')}</div>` : ''}</td>
         <td>${esc(c.foreman_name || '—')}</td><td>${cur ? dateRu(cur.from_date) : '—'}</td><td class="r"><button class="btn s" data-reassign="${c.id}">Переназначить прораба</button></td></tr>`; }).join('') || '<tr><td colspan="4" class="mute">Бригад пока нет</td></tr>'}</table></div>`;

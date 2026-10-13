@@ -22,6 +22,18 @@ def object_out(db: Session, o: m.WorkObject, full: bool, detail: bool = False) -
     out.foreman_name = o.foreman.name if o.foreman else None
     out.crew_name = o.crew.name if o.crew else None
     out.finance = compute(db, o, full=full)
+    if detail and out.materials:
+        # категория позиции для материалов, списанных со склада — чтобы группировать таблицу
+        from .stock import _cat_path
+        cats = {c.id: c for c in db.scalars(select(m.Category)).all()}
+        mv_ids = [x.movement_id for x in out.materials if x.movement_id]
+        prod_by_mv = {}
+        if mv_ids:
+            for mv in db.scalars(select(m.StockMovement).where(m.StockMovement.id.in_(mv_ids))).all():
+                prod_by_mv[mv.id] = mv.product
+        for x in out.materials:
+            p = prod_by_mv.get(x.movement_id)
+            x.category_path = (_cat_path(db, cats, p.category_id) or None) if p else None
     return out
 
 
@@ -34,11 +46,18 @@ def _get(db: Session, oid: int, user: m.User) -> m.WorkObject:
     return o
 
 
-def _crew_for(db: Session, foreman_id: int | None) -> int | None:
+def _crew_for(db: Session, foreman_id: int | None, crew_id: int | None = None) -> int | None:
+    """Бригада объекта. Явно выбранная должна принадлежать прорабу; если не выбрана —
+    единственная бригада прораба подставляется сама, при нескольких бригадах выбор остаётся за директором."""
     if not foreman_id:
         return None
-    crew = db.scalar(select(m.Crew).where(m.Crew.foreman_id == foreman_id, m.Crew.is_active == True))  # noqa: E712
-    return crew.id if crew else None
+    if crew_id:
+        crew = db.get(m.Crew, crew_id)
+        if not crew or crew.foreman_id != foreman_id:
+            raise HTTPException(400, "Эта бригада закреплена за другим прорабом")
+        return crew.id
+    crews = db.scalars(select(m.Crew).where(m.Crew.foreman_id == foreman_id, m.Crew.is_active == True)).all()  # noqa: E712
+    return crews[0].id if len(crews) == 1 else None
 
 
 @router.get("", response_model=list[ObjectOut])
@@ -58,7 +77,7 @@ def list_objects(stage: str | None = None, active: bool | None = None,
 
 @router.post("", response_model=ObjectDetail)
 def create_object(data: ObjectCreate, user: m.User = Depends(director), db: Session = Depends(get_db)):
-    o = m.WorkObject(**data.model_dump(), crew_id=_crew_for(db, data.foreman_id), salary_foreman_id=data.foreman_id)
+    o = m.WorkObject(**data.model_dump(exclude={"crew_id"}), crew_id=_crew_for(db, data.foreman_id, data.crew_id), salary_foreman_id=data.foreman_id)
     db.add(o)
     db.flush()
     db.add(m.ObjectStageLog(object_id=o.id, stage="contract", user_id=user.id))
@@ -77,10 +96,13 @@ def get_object(oid: int, user: m.User = Depends(current_user), db: Session = Dep
 def update_object(oid: int, data: ObjectUpdate, user: m.User = Depends(director), db: Session = Depends(get_db)):
     o = _get(db, oid, user)
     patch = data.model_dump(exclude_unset=True)
+    crew_id = patch.pop("crew_id", None)
     if "foreman_id" in patch:
-        o.crew_id = _crew_for(db, patch["foreman_id"])
+        o.crew_id = _crew_for(db, patch["foreman_id"], crew_id)
         if o.salary_foreman_id is None or o.stage == "contract":
             o.salary_foreman_id = patch["foreman_id"]
+    elif "crew_id" in data.model_fields_set:
+        o.crew_id = _crew_for(db, o.foreman_id, crew_id)
     for k, v in patch.items():
         setattr(o, k, v)
     db.commit()

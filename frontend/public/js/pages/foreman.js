@@ -57,7 +57,7 @@ async function renderObject(body, id) {
     <div class="pcard"><b>Смета работ</b><div class="small mute">${fmt(f.works_base)} работ · бригаде ${num(Number(f.crew_share) * 100)}% = ${fmt(f.crew_plan)}</div></div>
     <div class="pcard"><div class="row sp"><b>Фото · ${photos.length}</b></div>
       <div class="photos" style="margin-top:8px" id="fm-photos">${photos.slice(0, 12).map(p => `<a href="#" data-id="${p.id}" title="${esc(p.title)}"><img alt="${esc(p.title)}" loading="lazy"></a>`).join('') || '<span class="small mute">Пока нет</span>'}</div></div>
-    <div class="pcard"><b>Материалы на объекте</b><table style="margin-top:6px">${o.materials.map(m => `<tr><td>${esc(m.name)}<div class="small mute">${dateRu(m.date)}</div></td><td class="r num">${m.qty ? num(m.qty, 2) + ' ' + esc(m.unit || '') : ''}</td><td class="r num">${fmt(m.cost_sum)}</td></tr>`).join('') || '<tr><td class="mute">Пока ничего</td></tr>'}</table></div>
+    <div class="pcard"><b>Материалы на объекте</b><table style="margin-top:6px">${[...o.materials].sort((a, b) => (a.category_path || 'я').localeCompare(b.category_path || 'я', 'ru') || a.name.localeCompare(b.name, 'ru')).map(m => `<tr><td>${esc(m.name)}<div class="small mute">${m.category_path ? esc(m.category_path) + ' · ' : ''}${dateRu(m.date)}</div></td><td class="r num">${m.qty ? num(m.qty, 2) + ' ' + esc(m.unit || '') : ''}</td><td class="r num">${fmt(m.cost_sum)}</td></tr>`).join('') || '<tr><td class="mute">Пока ничего</td></tr>'}</table></div>
     <div class="pcard" id="fm-docs"></div>`;
   const reload = () => renderObject(body, id);
   docsBlock(body.querySelector('#fm-docs'), o.documents, { object_id: id }, reload, 'План, приложение с объёмами, схема щита — загрузит директор.', { canDelete: false });

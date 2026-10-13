@@ -30,10 +30,6 @@ def list_crews(user: m.User = Depends(current_user), db: Session = Depends(get_d
 
 @router.post("", response_model=CrewOut)
 def create_crew(data: CrewCreate, _: m.User = Depends(director), db: Session = Depends(get_db)):
-    if data.foreman_id:
-        busy = db.scalar(select(m.Crew).where(m.Crew.foreman_id == data.foreman_id, m.Crew.is_active == True))  # noqa: E712
-        if busy:
-            raise HTTPException(400, f"У этого прораба уже есть бригада «{busy.name}»")
     c = m.Crew(**data.model_dump())
     db.add(c)
     db.flush()
@@ -65,9 +61,8 @@ def reassign(cid: int, data: CrewReassign, _: m.User = Depends(director), db: Se
     new = db.get(m.User, data.foreman_id)
     if not new or not new.is_foreman:
         raise HTTPException(400, "Это не прораб")
-    busy = db.scalar(select(m.Crew).where(m.Crew.foreman_id == new.id, m.Crew.is_active == True, m.Crew.id != c.id))  # noqa: E712
-    if busy:
-        raise HTTPException(400, f"У прораба уже есть бригада «{busy.name}»")
+    if c.foreman_id == new.id:
+        raise HTTPException(400, "Бригада уже у этого прораба")
     today = date.today()
     for h in c.history:
         if h.to_date is None:
