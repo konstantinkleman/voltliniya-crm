@@ -25,10 +25,11 @@ async def main():
         rows = await f.locator("tr[data-line]").count(); assert rows == 2, rows
         status = await pg.locator("[data-scan-status]").text_content(); print(status)
         # вторая строка — новая позиция, название подставлено
-        names = await f.locator("input[name^=n]:not(.hidden)").all(); assert len(names) == 1 and "Коробка" in await names[0].input_value()
+        names = await f.locator("div[name^=new]:not(.hidden) input[name^=n]").all(); assert len(names) == 1 and "Коробка" in await names[0].input_value()
+        assert await f.locator("tr[data-line]").nth(1).evaluate("e=>e.style.background") != "", "сомнительная строка не подсвечена"
         await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached"); await pg.wait_for_timeout(600)
         await pg.screenshot(path=f"{OUT}/scan-2.png", full_page=True)
-        t = await pg.locator(".wh").inner_text(); assert "Коробка распределительная" in t and "500" in t, t
+        t = await pg.locator(".wh").inner_text(); assert "Коробка распред. 100×100" in t and "500" in t, t
         await b.close()
 asyncio.run(main())
 print("\n".join(errors) if errors else "no browser errors"); print("SCAN E2E OK")

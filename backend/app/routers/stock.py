@@ -462,8 +462,19 @@ async def recognize_invoice(file: UploadFile = File(...), _: m.User = Depends(di
     data = await file.read()
     if len(data) > settings.MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(413, "Файл слишком большой")
-    res = invoice_ai.recognize(data, file.content_type or "image/jpeg")
+    cats = db.scalars(select(m.Category)).all()
+    cat_by_id = {c.id: c for c in cats}
+    def path(c):
+        parts = []; seen = set()
+        while c and c.id not in seen:
+            seen.add(c.id); parts.append(c.name); c = cat_by_id.get(c.parent_id)
+        return " → ".join(reversed(parts))
+    paths = {path(c): c.id for c in cats}
+    res = invoice_ai.recognize(data, file.content_type or "image/jpeg", list(paths.keys()))
     res["lines"] = invoice_ai.match_products(db, res["lines"])
+    for ln in res["lines"]:
+        cat = ln.get("category")
+        ln["category_id"] = paths.get(cat) or next((cid for p, cid in paths.items() if cat and (p.lower() == str(cat).lower() or p.lower().endswith(str(cat).lower()))), None)
     return res
 
 
