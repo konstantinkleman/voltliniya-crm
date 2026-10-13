@@ -124,22 +124,46 @@ function receiptModal(main, r) {
   const wh = whs.find(w => w.id === whSel);
   const prodOpts = () => `<option value="">— выбрать —</option>${prods.map(p => `<option value="${p.id}">${esc(p.name)} (${esc(p.unit)})</option>`).join('')}<option value="new">+ новая позиция…</option>`;
   const inp = 'padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
-  const catSel = (i) => `<select name="k${i}" style="flex:1;${inp}">${catOpts().map(o => `<option value="${o.value}" ${String(o.value) === String(catSel || '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+  const catSelect = (i) => `<select name="k${i}" title="Категория" style="flex:1;min-width:0;${inp}">${catOpts().map(o => `<option value="${o.value}" ${String(o.value) === String(catSel || '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+  // строка: позиция; под ней — название (для новой), категория + единица (для новой или нераспознанной), либо подпись категории найденной позиции
   const line = (i, hint = '') => `<tr data-line="${i}"><td>${hint}<select name="p${i}" style="width:100%;${inp}">${prodOpts()}</select>
-    <div name="new${i}" class="hidden" style="margin-top:4px"><input name="n${i}" placeholder="Название новой позиции" style="width:100%;${inp}"><div class="row" style="margin-top:4px;gap:6px">${catSel(i)}<select name="u${i}" style="width:84px;${inp}">${unitOpts.map(u => `<option value="${u.value}">${u.label}</option>`).join('')}</select></div></div></td>
-    <td><input name="q${i}" type="number" step="0.001" inputmode="decimal" placeholder="кол-во" style="width:90px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></td>
-    <td><input name="c${i}" type="number" step="0.01" inputmode="decimal" placeholder="цена" style="width:90px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></td></tr>`;
+    <div name="new${i}" class="hidden" style="margin-top:4px"><input name="n${i}" placeholder="Название новой позиции" style="width:100%;${inp}"></div>
+    <div name="meta${i}" class="row hidden" style="margin-top:4px;gap:6px">${catSelect(i)}<select name="u${i}" title="Единица" style="width:84px;${inp}">${unitOpts.map(u => `<option value="${u.value}">${u.label}</option>`).join('')}</select></div>
+    <div name="info${i}" class="small mute hidden" style="margin-top:3px"></div></td>
+    <td><input name="q${i}" type="number" step="0.001" inputmode="decimal" placeholder="кол-во" style="width:90px;${inp}"></td>
+    <td><input name="c${i}" type="number" step="0.01" inputmode="decimal" placeholder="цена" style="width:90px;${inp}"></td>
+    <td style="padding-left:0"><button type="button" class="btn s" data-skip="${i}" title="Не заносить эту строку в приход" style="padding:4px 8px">×</button></td></tr>`;
   const m = openModal(`<div class="row sp"><h2>Приход на ${esc(wh?.name || 'склад')}</h2>${D.invoice_ai ? `<label class="btn s p" style="cursor:pointer">📷 По фото накладной<input type="file" accept="image/*,application/pdf" capture="environment" data-scan class="hidden"></label>` : ''}</div>
     <div class="small mute" data-scan-status style="margin-top:4px"></div><form>
     <div class="fields2"><div class="field"><label>Склад</label><select name="warehouse_id">${whs.map(w => `<option value="${w.id}" ${w.id === whSel ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div><div class="field"><label>Дата</label><input name="date" type="date" value="${today()}"></div></div>
     <div class="fields2"><div class="field"><label>Поставщик</label><input name="supplier" placeholder="Кабель-Центр"></div><div class="field"><label>№ накладной</label><input name="doc_number"></div></div>
-    <table style="margin-top:12px" id="rc-lines"><tr><th>Позиция</th><th>Кол-во</th><th>Цена за ед., ₽</th></tr>${line(0)}${line(1)}${line(2)}</table>
+    <table style="margin-top:12px" id="rc-lines"><tr><th>Позиция</th><th>Кол-во</th><th>Цена за ед., ₽</th><th></th></tr>${line(0)}${line(1)}${line(2)}</table>
     <button type="button" class="btn s" data-more style="margin-top:6px">+ строка</button>
     <div class="field"><label><input type="checkbox" name="add_expense" checked> Записать сумму закупки в расходы (категория «Закупка материалов»)</label></div>
     <div class="actions"><button type="button" class="btn" data-cancel>Отмена</button><button type="submit" class="btn p">Провести приход</button></div></form>`);
   m.querySelector('.box').style.width = 'min(640px,100%)';
   let n = 3;
-  const bind = () => m.querySelectorAll('select[name^=p]').forEach(sel => sel.onchange = () => { const i = sel.name.slice(1); m.querySelector(`[name=new${i}]`).classList.toggle('hidden', sel.value !== 'new'); });
+  // что показывать под позицией: новая → название + категория/единица; распознана, но не найдена → категория/единица; найдена → её категория
+  const sync = (i) => {
+    const tr = m.querySelector(`tr[data-line="${i}"]`); if (!tr) return;
+    const v = tr.querySelector(`[name=p${i}]`).value, isNew = v === 'new', prod = v && !isNew ? prods.find(p => String(p.id) === v) : null;
+    tr.querySelector(`[name=new${i}]`).classList.toggle('hidden', !isNew);
+    tr.querySelector(`[name=meta${i}]`).classList.toggle('hidden', !(isNew || (tr.dataset.scanned && !v)));
+    const info = tr.querySelector(`[name=info${i}]`);
+    info.classList.toggle('hidden', !prod);
+    if (prod) info.textContent = `${prod.category_path || 'без категории'} · ${prod.unit}`;
+  };
+  const skipped = (tr) => tr.dataset.skip === '1';
+  const bind = () => {
+    m.querySelectorAll('select[name^=p]').forEach(sel => sel.onchange = () => sync(sel.name.slice(1)));
+    m.querySelectorAll('[data-skip]').forEach(b => b.onclick = () => {
+      const tr = b.closest('tr'), off = !skipped(tr);
+      tr.dataset.skip = off ? '1' : '';
+      tr.style.opacity = off ? '.4' : ''; tr.style.textDecoration = off ? 'line-through' : '';
+      b.textContent = off ? '↶' : '×'; b.title = off ? 'Вернуть строку в приход' : 'Не заносить эту строку в приход';
+      tr.querySelectorAll('input,select').forEach(el => el.disabled = off);
+    });
+  };
   bind();
   m.querySelector('[data-more]').onclick = () => { m.querySelector('#rc-lines').insertAdjacentHTML('beforeend', line(n++)); bind(); };
   const scan = m.querySelector('[data-scan]');
@@ -163,36 +187,40 @@ function receiptModal(main, r) {
         const low = ln.confidence === 'low';
         const hint = `<div class="small ${ln.product_id ? 'ok' : 'warn'}" style="margin-bottom:3px" title="${esc(ln.raw || '')}">${esc(ln.raw || ln.name)}${ln.product_id ? ' → найдено' : ln.candidates.length ? ' → выберите или создайте' : ' → новая позиция'}${low ? ' · <b class="warn">проверьте кол-во и цену</b>' : ''}</div>`;
         tbl.insertAdjacentHTML('beforeend', line(i, hint));
-        const tr = m.querySelector(`tr[data-line="${i}"]`); tr.dataset.unit = ln.unit || ''; tr.dataset.raw = ln.raw || '';
+        const tr = m.querySelector(`tr[data-line="${i}"]`); tr.dataset.unit = ln.unit || ''; tr.dataset.raw = ln.raw || ''; tr.dataset.scanned = '1';
         if (low) tr.style.background = 'var(--warn-soft)';
         if (ln.unit) m.querySelector(`[name=u${i}]`).value = ln.unit;
-        if (ln.category_id) m.querySelector(`[name=k${i}]`).value = String(ln.category_id);
+        m.querySelector(`[name=k${i}]`).value = ln.category_id ? String(ln.category_id) : '';
         const sel = m.querySelector(`[name=p${i}]`);
         if (ln.product_id) { sel.value = String(ln.product_id); matched++; }
         else {
           // варианты — наверх списка
-          for (const c of [...ln.candidates].reverse()) { const o = sel.querySelector(`option[value="${c.id}"]`); if (o) { o.textContent = `≈ ${c.name} (${c.unit})`; sel.insertBefore(o, sel.options[1]); } }
-          sel.value = ln.candidates.length ? '' : 'new';
+          for (const c of [...(ln.candidates || [])].reverse()) { const o = sel.querySelector(`option[value="${c.id}"]`); if (o) { o.textContent = `≈ ${c.name} (${c.unit})`; sel.insertBefore(o, sel.options[1]); } }
+          sel.value = ln.candidates?.length ? '' : 'new';
           m.querySelector(`[name=n${i}]`).value = ln.name;
-          m.querySelector(`[name=new${i}]`).classList.toggle('hidden', sel.value !== 'new');
         }
         m.querySelector(`[name=q${i}]`).value = Number(ln.qty) || '';
         m.querySelector(`[name=c${i}]`).value = Number(ln.unit_cost) || '';
+        sync(i);
       }
       bind();
       const lows = res.lines.filter(l => l.confidence === 'low').length;
-      status.textContent = res.lines.length ? `Распознано строк: ${res.lines.length}, сопоставлено: ${matched}${lows ? `, сомнительных: ${lows} (подсвечены)` : ''}. Проверьте количество и цены перед проведением.` : 'Строки не распознаны — попробуйте более чёткое фото или введите вручную.';
+      status.textContent = res.lines.length ? `Распознано строк: ${res.lines.length}, сопоставлено: ${matched}${lows ? `, сомнительных: ${lows} (подсвечены)` : ''}. Проверьте количество, цены и категории; лишние строки исключите крестиком.` : 'Строки не распознаны — попробуйте более чёткое фото или введите вручную.';
     } catch (err) { status.textContent = ''; toast(err.message, true); }
     finally { scan.disabled = false; scan.value = ''; }
   };
   m.querySelector('[data-cancel]').onclick = closeModal;
   m.querySelector('form').onsubmit = async (e) => {
     e.preventDefault(); const f = e.target; const lines = [];
+    let skippedN = 0;
     for (let i = 0; i < n; i++) {
       const sel = f[`p${i}`]; if (!sel) continue;
+      const tr = sel.closest('tr');
+      if (skipped(tr)) { skippedN++; continue; }
       const qty = Number(f[`q${i}`].value), cost = Number(f[`c${i}`].value);
-      if (!sel.value || !qty) continue;
-      if (sel.value === 'new') { const name = f[`n${i}`].value.trim(); if (!name) return toast('Укажите название новой позиции', true); const tr = sel.closest('tr'); lines.push({ new_product: { name, unit: f[`u${i}`].value, category_id: f[`k${i}`].value ? Number(f[`k${i}`].value) : null, note: tr.dataset.raw || null }, qty, unit_cost: cost }); }
+      if (!qty) continue;
+      if (!sel.value) { if (tr.dataset.scanned) return toast(`Строка «${(tr.dataset.raw || '').slice(0, 40)}» не сопоставлена: выберите позицию, создайте новую или исключите её (×)`, true); continue; }
+      if (sel.value === 'new') { const name = f[`n${i}`].value.trim(); if (!name) return toast('Укажите название новой позиции', true); lines.push({ new_product: { name, unit: f[`u${i}`].value, category_id: f[`k${i}`].value ? Number(f[`k${i}`].value) : null, note: tr.dataset.raw || null }, qty, unit_cost: cost }); }
       else lines.push({ product_id: Number(sel.value), qty, unit_cost: cost });
     }
     if (!lines.length) return toast('Заполните хотя бы одну строку', true);

@@ -92,9 +92,11 @@ async def main():
         await pg.click(".seg [data-wh]:has-text('Андрей')"); await pg.wait_for_timeout(400)   # приход на склад прораба объекта
         await pg.click("[data-newcat]"); await fill_modal({"name": "Кабель", "markup_pct": 40})
         await pg.click("[data-receipt]"); await pg.wait_for_selector(".modal.open form")
-        cat_id = await pg.locator(".modal.open [name=new_cat] option", has_text="Кабель").get_attribute("value"); await pg.select_option(".modal.open [name=new_cat]", cat_id); await pg.select_option(".modal.open [name=new_unit]", "м")
         await pg.select_option(".modal.open [name=p0]", "new"); await pg.fill(".modal.open [name=n0]", "ВВГнг-LS 3×2,5"); await pg.fill(".modal.open [name=q0]", "500"); await pg.fill(".modal.open [name=c0]", "86")
-        await pg.select_option(".modal.open [name=p1]", "new"); await pg.fill(".modal.open [name=n1]", "Подрозетник d68"); await pg.fill(".modal.open [name=q1]", "200"); await pg.fill(".modal.open [name=c1]", "9")
+        cat_id = await pg.locator(".modal.open [name=k0] option", has_text="Кабель").get_attribute("value"); await pg.select_option(".modal.open [name=k0]", cat_id); await pg.select_option(".modal.open [name=u0]", "м")
+        await pg.select_option(".modal.open [name=p1]", "new"); await pg.fill(".modal.open [name=n1]", "Подрозетник d68"); await pg.fill(".modal.open [name=q1]", "200"); await pg.fill(".modal.open [name=c1]", "9"); await pg.select_option(".modal.open [name=u1]", "шт")
+        # третью пустую строку помечаем «не заносить» — не должна мешать
+        await pg.click(".modal.open [data-skip='2']")
         await pg.fill(".modal.open [name=supplier]", "Кабель-Центр")
         await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached"); await pg.wait_for_timeout(600)
         await shot("08a-stock")

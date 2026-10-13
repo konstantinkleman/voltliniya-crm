@@ -472,9 +472,20 @@ async def recognize_invoice(file: UploadFile = File(...), _: m.User = Depends(di
     paths = {path(c): c.id for c in cats}
     res = invoice_ai.recognize(data, file.content_type or "image/jpeg", list(paths.keys()))
     res["lines"] = invoice_ai.match_products(db, res["lines"])
+    # модель может написать путь иначе («->», без пробелов, только последний уровень) — сравниваем мягко
+    import re as _re
+    norm = lambda s: _re.sub(r"[^a-zа-яё0-9]+", "", str(s).lower())
+    by_norm = {norm(p): cid for p, cid in paths.items()}
+    by_leaf = {norm(c.name): c.id for c in cats}
     for ln in res["lines"]:
         cat = ln.get("category")
-        ln["category_id"] = paths.get(cat) or next((cid for p, cid in paths.items() if cat and (p.lower() == str(cat).lower() or p.lower().endswith(str(cat).lower()))), None)
+        cid = None
+        if cat:
+            k = norm(cat)
+            cid = paths.get(cat) or by_norm.get(k) or by_leaf.get(k) \
+                or next((v for p, v in by_norm.items() if p.endswith(k)), None) \
+                or next((v for p, v in by_norm.items() if k.endswith(p)), None)
+        ln["category_id"] = cid
     return res
 
 
