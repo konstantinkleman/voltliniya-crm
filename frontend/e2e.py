@@ -18,8 +18,9 @@ async def main():
         async def shot(name): await pg.screenshot(path=f"{OUT}/{name}.png", full_page=True)
         async def pick(page, name, text):
             """combo с поиском: ввести текст и выбрать первый подходящий пункт"""
-            inp = page.locator(f".modal.open .combo[data-combo='{name}'] .combo-in"); await inp.click(); await inp.fill(text)
-            await page.locator(".combo-list .combo-it", has_text=text).first.click(); await page.wait_for_timeout(80)
+            await page.locator(f".modal.open .combo[data-combo='{name}'] .combo-btn").click()
+            await page.locator(".combo-panel .combo-search").fill(text)
+            await page.locator(".combo-panel .combo-it", has_text=text).first.click(); await page.wait_for_timeout(80)
         async def fill_modal(values):
             for k, v in values.items():
                 el = pg.locator(f".modal.open form [name={k}]")

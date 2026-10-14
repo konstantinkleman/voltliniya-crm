@@ -21,12 +21,12 @@ export async function stockIssueModal({ warehouse: wh, object = null, objects = 
   const byId = Object.fromEntries(list.map(p => [p.id, p]));
   const opts = list.map(p => ({ value: p.id, label: p.name, sub: `${num(avail[p.id], 3)} ${p.unit}${p.category_path ? ' · ' + p.category_path : ''}` }));
   const inp = 'padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
-  const line = (i) => `<tr data-line="${i}"><td>${comboHtml(`p${i}`, { placeholder: 'Позиция — начните вводить' })}<div name="av${i}" class="small mute" style="margin-top:3px;min-height:14px"></div></td>
+  const line = (i) => `<tr data-line="${i}"><td>${comboHtml(`p${i}`, { placeholder: '— выбрать позицию —' })}<div name="av${i}" class="small mute" style="margin-top:3px;min-height:14px"></div></td>
     <td><input name="q${i}" type="number" step="0.001" inputmode="decimal" placeholder="кол-во" style="width:96px;${inp}"></td>
     <td style="padding-left:0"><button type="button" class="btn s" data-rm="${i}" title="Убрать строку" style="padding:4px 8px">×</button></td></tr>`;
   const title = returnMode ? 'Вернуть на склад' : 'Списать со склада';
   const m = openModal(`<h2>${title}</h2><p class="small mute" style="margin:6px 0 0">${esc(wh.name)} ${returnMode ? '←' : '→'} ${object ? esc(object.client_name) : 'объект'}${returnMode ? '' : ' · себестоимость уйдёт в объект по средней цене склада'}</p><form>
-    ${object ? '' : `<div class="field"><label>Объект</label>${comboHtml('object_id', { placeholder: 'Объект — начните вводить' })}</div>`}
+    ${object ? '' : `<div class="field"><label>Объект</label>${comboHtml('object_id', { placeholder: '— выбрать объект —' })}</div>`}
     <table style="margin-top:12px" id="is-lines"><tr><th>Позиция</th><th>Кол-во</th><th></th></tr></table>
     <button type="button" class="btn s" data-more style="margin-top:6px">+ позиция</button>
     <div class="fields2"><div class="field"><label>Дата</label><input name="date" type="date" value="${today()}"></div><div class="field"><label>Комментарий</label><input name="note"></div></div>
@@ -46,7 +46,7 @@ export async function stockIssueModal({ warehouse: wh, object = null, objects = 
     return i;
   };
   addLine(presetProductId); addLine(); addLine();
-  m.querySelector('[data-more]').onclick = () => { const i = addLine(); m.querySelector(`[data-combo="p${i}"] .combo-in`).focus(); };
+  m.querySelector('[data-more]').onclick = () => { const i = addLine(); f[`p${i}`]._combo.open(); };
   m.querySelector('[data-cancel]').onclick = closeModal;
   f.onsubmit = async (e) => {
     e.preventDefault();

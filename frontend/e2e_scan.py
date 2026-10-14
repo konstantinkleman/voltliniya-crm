@@ -36,10 +36,12 @@ async def main():
         names = await f.locator("div[name^=new]:not(.hidden) input[name^=n]").all(); assert len(names) == 2 and "Коробка" in await names[0].input_value()
         assert await f.locator("div[name^=meta]:not(.hidden) .combo[data-combo^=k]").count() == 2, "выбор категории не показан"
         assert await r1.locator("input[name^=k]").input_value() == str(cat_id), "категория «Коробки» не сопоставлена"
-        assert "Коробки" in await r1.locator(".combo[data-combo^=k] .combo-in").input_value()
+        assert "Коробки" in await r1.locator(".combo[data-combo^=k] .combo-btn").inner_text()
         # поиск в списке позиций: ввод «ввг» показывает кабель
-        await r1.locator(".combo[data-combo^=p] .combo-in").click(); await r1.locator(".combo[data-combo^=p] .combo-in").fill("ввг")
-        items = await pg.locator(".combo-list .combo-it").all_text_contents(); assert any("ВВГ" in x for x in items) and not any("новая" in x for x in items), items
+        await r1.locator(".combo[data-combo^=p] .combo-btn").click()
+        items = await pg.locator(".combo-panel .combo-it").all_text_contents(); assert any("новая" in x for x in items), items   # список раскрыт сразу, целиком
+        await pg.locator(".combo-panel .combo-search").fill("ввг")
+        items = await pg.locator(".combo-panel .combo-it").all_text_contents(); assert any("ВВГ" in x for x in items) and not any("новая" in x for x in items), items
         await pg.keyboard.press("Escape"); assert await r1.locator("input[name^=p]").input_value() == "new"
         assert await r1.locator("select[name^=u]").input_value() == "шт"
         assert await r1.evaluate("e=>e.style.background") != "", "сомнительная строка не подсвечена"

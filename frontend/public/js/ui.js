@@ -50,7 +50,7 @@ export function formModal({ title, fields, submit = 'Сохранить', onSubm
       const opts = (f.options || []).map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(f.value ?? '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
       return `<div class="field"><label>${esc(f.label)}</label><select name="${esc(f.name)}" ${f.required ? 'required' : ''}>${opts}</select></div>`;
     }
-    if (f.type === 'combo') return `<div class="field"><label>${esc(f.label)}</label>${comboHtml(f.name, { placeholder: f.placeholder || 'Начните вводить…' })}</div>`;
+    if (f.type === 'combo') return `<div class="field"><label>${esc(f.label)}</label>${comboHtml(f.name, { placeholder: f.placeholder || '— выбрать —' })}</div>`;
     if (f.type === 'textarea') return `<div class="field"><label>${esc(f.label)}</label><textarea name="${esc(f.name)}" placeholder="${esc(f.placeholder || '')}">${esc(f.value ?? '')}</textarea></div>`;
     if (f.type === 'file') return `<div class="field"><label>${esc(f.label)}</label><input type="file" name="${esc(f.name)}" ${f.accept ? `accept="${f.accept}"` : ''} ${f.required ? 'required' : ''} ${f.capture ? 'capture="environment"' : ''} ${f.multiple ? 'multiple' : ''}></div>`;
     return `<div class="field"><label>${esc(f.label)}</label><input type="${f.type || 'text'}" name="${esc(f.name)}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.required ? 'required' : ''} ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.inputmode ? `inputmode="${f.inputmode}"` : ''}></div>`;
@@ -80,57 +80,81 @@ export function formModal({ title, fields, submit = 'Сохранить', onSubm
 }
 
 // ---------- combo: выпадающий список с поиском ----------
-// Разметка: comboHtml(name, {style}) → <div class="combo" data-combo="name">…</div>; затем mountCombo(el, {options, value, placeholder, onChange}).
-// Внутри — скрытый <input name="…"> с выбранным значением: form.elements[name].value работает как у <select>.
-// Управление: el.querySelector('input[type=hidden]')._combo → { set(value), setOptions(options), get value }.
+// Кнопка с выбранным значением; по клику сразу раскрывается весь список, сверху — строка поиска (как у «ВсеИнструменты»).
+// Разметка: comboHtml(name, {style, placeholder}) → <div class="combo" data-combo="name">…</div>; затем mountCombo(el, {options, value, onChange, allowEmpty}).
+// Внутри — скрытый <input name="…"> с выбранным значением: form.elements[name].value работает как у <select>, событие change тоже.
+// Управление: form.elements[name]._combo → { set(value), setOptions(options), get value }.
 const cyr = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е').replace(/[×x]/g, 'х').replace(/,/g, '.');
-export const comboHtml = (name, { style = '', placeholder = '' } = {}) => `<div class="combo" data-combo="${esc(name)}" style="${style}"><input type="hidden" name="${esc(name)}"><input type="text" class="combo-in" autocomplete="off" spellcheck="false" placeholder="${esc(placeholder)}"><span class="combo-arr">▾</span></div>`;
-let comboList = null; // единый выпадающий список на всю страницу (fixed, чтобы не резался модалкой)
-export function mountCombo(el, { options = [], value = '', placeholder, onChange = null, allowEmpty = true } = {}) {
-  const hid = el.querySelector('input[type=hidden]'), inp = el.querySelector('.combo-in');
-  if (placeholder !== undefined) inp.placeholder = placeholder;
-  let opts = options, active = -1, shown = [];
+export const comboHtml = (name, { style = '', placeholder = '' } = {}) => `<div class="combo" data-combo="${esc(name)}" style="${style}"><input type="hidden" name="${esc(name)}"><button type="button" class="combo-btn is-empty" data-ph="${esc(placeholder || '— выбрать —')}">${esc(placeholder || '— выбрать —')}</button><span class="combo-arr">▾</span></div>`;
+let panel = null; // единая панель на всю страницу (fixed — не режется прокруткой модалки)
+const closePanel = () => { if (panel) { panel._owner?.classList.remove('open'); panel.remove(); panel = null; } };
+const isTouch = () => matchMedia('(pointer: coarse)').matches;
+export function mountCombo(el, { options = [], value = '', onChange = null, allowEmpty = true } = {}) {
+  const hid = el.querySelector('input[type=hidden]'), btn = el.querySelector('.combo-btn');
+  let opts = options, shown = [], active = -1;
   const label = (v) => (opts.find(o => String(o.value) === String(v)) || {}).label ?? '';
-  const render = () => { inp.value = label(hid.value); inp.classList.toggle('is-empty', !hid.value); };
-  const close = () => { if (comboList && comboList._owner === el) { comboList.remove(); comboList = null; } el.classList.remove('open'); };
-  const open = (q = '') => {
-    close();
-    const qq = cyr(q).trim(); const toks = qq.split(/\s+/).filter(Boolean);
-    shown = toks.length ? opts.filter(o => { const l = cyr(o.label) + ' ' + cyr(o.sub || ''); return toks.every(t => l.includes(t)); }) : opts;
-    if (allowEmpty && shown === opts && !opts.some(o => o.value === '')) shown = [{ value: '', label: '—' }, ...opts];
-    shown = shown.slice(0, 200);
-    const r = inp.getBoundingClientRect();
-    const below = window.innerHeight - r.bottom; const h = Math.min(280, Math.max(120, below > 200 ? below - 12 : r.top - 12));
-    comboList = document.createElement('div'); comboList.className = 'combo-list'; comboList._owner = el;
-    comboList.style.cssText = `left:${r.left}px;width:${Math.max(r.width, 220)}px;max-height:${h}px;` + (below > 200 || r.top < 200 ? `top:${r.bottom + 2}px` : `bottom:${window.innerHeight - r.top + 2}px`);
-    comboList.innerHTML = shown.map((o, i) => `<div class="combo-it ${String(o.value) === String(hid.value) ? 'sel' : ''} ${o.value === 'new' ? 'new' : ''}" data-i="${i}">${esc(o.label)}${o.sub ? `<span class="small mute"> · ${esc(o.sub)}</span>` : ''}</div>`).join('') || '<div class="combo-it mute">ничего не найдено</div>';
-    comboList.onmousedown = (e) => { e.preventDefault(); const it = e.target.closest('[data-i]'); if (it) pick(shown[Number(it.dataset.i)]); };
-    document.body.appendChild(comboList); el.classList.add('open');
-    active = shown.findIndex(o => String(o.value) === String(hid.value)); hl();
+  const render = () => { const l = label(hid.value); btn.textContent = l || btn.dataset.ph; btn.classList.toggle('is-empty', !l); };
+  const filter = (q) => {
+    const toks = cyr(q).trim().split(/\s+/).filter(Boolean);
+    let list = toks.length ? opts.filter(o => { const l = cyr(o.label) + ' ' + cyr(o.sub || ''); return toks.every(t => l.includes(t)); }) : opts;
+    if (allowEmpty && !toks.length && !opts.some(o => o.value === '')) list = [{ value: '', label: '—' }, ...list];
+    return list.slice(0, 300);
   };
-  const hl = () => { if (!comboList) return; comboList.querySelectorAll('.combo-it').forEach((x, i) => x.classList.toggle('act', i === active)); const a = comboList.querySelector('.combo-it.act'); if (a) a.scrollIntoView({ block: 'nearest' }); };
-  const pick = (o) => { if (!o) return; const changed = String(hid.value) !== String(o.value); hid.value = o.value; render(); close(); if (changed) { hid.dispatchEvent(new Event('change', { bubbles: true })); if (onChange) onChange(o.value, o); } };
-  inp.onfocus = () => { inp.select(); open(''); };
-  inp.onclick = () => { if (!comboList || comboList._owner !== el) open(''); };
-  inp.oninput = () => open(inp.value);
-  inp.onkeydown = (e) => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!comboList || comboList._owner !== el) open(inp.value); active = Math.max(0, Math.min(shown.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1))); hl(); }
-    else if (e.key === 'Enter') { if (comboList && comboList._owner === el) { e.preventDefault(); pick(shown[active] || (shown.length === 1 ? shown[0] : null)); } }
-    else if (e.key === 'Escape') { render(); close(); }
-    else if (e.key === 'Tab') { if (comboList && comboList._owner === el && shown.length === 1 && inp.value) pick(shown[0]); else { render(); close(); } }
+  const place = () => {
+    if (!panel) return;
+    const r = btn.getBoundingClientRect(), vw = window.innerWidth, vh = (window.visualViewport?.height) || window.innerHeight;
+    if (vw < 640) { panel.style.cssText = `left:8px;right:8px;top:8px;max-height:${Math.max(200, vh - 16)}px`; return; }
+    const below = vh - r.bottom - 12, above = r.top - 12, down = below >= 220 || below >= above;
+    const h = Math.min(360, Math.max(160, down ? below : above));
+    panel.style.cssText = `left:${Math.min(r.left, vw - Math.max(r.width, 280) - 8)}px;width:${Math.max(r.width, 280)}px;max-height:${h}px;` + (down ? `top:${r.bottom + 4}px` : `bottom:${window.innerHeight - r.top + 4}px`);
   };
-  inp.onblur = () => { setTimeout(() => { render(); close(); }, 120); };
+  const draw = (q) => {
+    shown = filter(q);
+    const box = panel.querySelector('.combo-items');
+    box.innerHTML = shown.map((o, i) => `<div class="combo-it ${String(o.value) === String(hid.value) ? 'sel' : ''} ${o.value === 'new' ? 'new' : ''}" data-i="${i}">${esc(o.label)}${o.sub ? `<span class="small mute"> · ${esc(o.sub)}</span>` : ''}</div>`).join('') || '<div class="combo-it mute">ничего не найдено</div>';
+    active = shown.findIndex(o => String(o.value) === String(hid.value)); hl(false);
+  };
+  const hl = (scroll = true) => { if (!panel) return; panel.querySelectorAll('.combo-it').forEach((x, i) => x.classList.toggle('act', i === active)); if (scroll) panel.querySelector('.combo-it.act')?.scrollIntoView({ block: 'nearest' }); };
+  const pick = (o) => { if (!o) return; const changed = String(hid.value) !== String(o.value); hid.value = o.value; render(); close(); btn.focus(); if (changed) { hid.dispatchEvent(new Event('change', { bubbles: true })); if (onChange) onChange(o.value, o); } };
+  const close = () => { if (panel && panel._owner === el) closePanel(); };
+  const open = () => {
+    if (btn.disabled) return;
+    closePanel();
+    panel = document.createElement('div'); panel.className = 'combo-panel'; panel._owner = el; el.classList.add('open');
+    panel.innerHTML = `<div class="combo-search-w"><input type="text" class="combo-search" placeholder="Поиск…" autocomplete="off" spellcheck="false"><span>⌕</span></div><div class="combo-items"></div>`;
+    document.body.appendChild(panel); place(); draw('');
+    const inp = panel.querySelector('.combo-search');
+    inp.oninput = () => draw(inp.value);
+    inp.onkeydown = (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, Math.min(shown.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1))); hl(); }
+      else if (e.key === 'Enter') { e.preventDefault(); pick(shown[active] || (shown.length === 1 ? shown[0] : null)); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); btn.focus(); }
+      else if (e.key === 'Tab') close();
+    };
+    panel.querySelector('.combo-items').onmousedown = (e) => { e.preventDefault(); const it = e.target.closest('[data-i]'); if (it) pick(shown[Number(it.dataset.i)]); };
+    // на телефоне не вызываем клавиатуру сразу — сначала показываем список; поиск по тапу в поле
+    if (!isTouch()) inp.focus();
+    // выделенный пункт — в зоне видимости
+    panel.querySelector('.combo-it.sel')?.scrollIntoView({ block: 'center' });
+  };
+  btn.onclick = () => (panel && panel._owner === el) ? close() : open();
+  btn.onkeydown = (e) => { if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } else if (e.key === 'Escape') close(); };
   hid._combo = {
     get value() { return hid.value; },
     set: (v) => { hid.value = v ?? ''; render(); },
     setOptions: (o) => { opts = o; render(); },
-    el,
+    el, open, close,
   };
+  el._place = place;
   hid.value = value ?? ''; render();
   return hid._combo;
 }
-window.addEventListener('scroll', () => { if (comboList) { comboList.remove(); comboList = null; } }, true);
-window.addEventListener('resize', () => { if (comboList) { comboList.remove(); comboList = null; } });
+// клик вне панели — закрыть; прокрутка страницы/модалки (не самого списка) — переставить панель
+document.addEventListener('mousedown', (e) => { if (panel && !panel.contains(e.target) && !panel._owner.contains(e.target)) closePanel(); });
+document.addEventListener('touchstart', (e) => { if (panel && !panel.contains(e.target) && !panel._owner.contains(e.target)) closePanel(); }, { passive: true });
+window.addEventListener('scroll', (e) => { if (panel && !panel.contains(e.target)) panel._owner._place(); }, true);
+window.addEventListener('resize', () => { if (panel) panel._owner._place(); });
+window.visualViewport?.addEventListener('resize', () => { if (panel) panel._owner._place(); });
 
 export function confirmModal(text, onYes, yes = 'Да') {
   const m = openModal(`<p style="margin:0 0 4px">${esc(text)}</p><div class="actions"><button class="btn" data-cancel>Отмена</button><button class="btn p danger" data-yes>${esc(yes)}</button></div>`);

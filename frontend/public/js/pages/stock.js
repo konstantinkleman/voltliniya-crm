@@ -125,7 +125,7 @@ function receiptModal(main, r) {
   const prodOpts = () => [...prods.map(p => ({ value: p.id, label: p.name, sub: p.unit + (p.category_path ? ' · ' + p.category_path : '') })), { value: 'new', label: '+ новая позиция…' }];
   const inp = 'padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
   // строка: позиция; под ней — название (для новой), категория + единица (для новой или нераспознанной), либо подпись категории найденной позиции
-  const line = (i, hint = '') => `<tr data-line="${i}"><td>${hint}${comboHtml(`p${i}`, { placeholder: 'Позиция — начните вводить' })}
+  const line = (i, hint = '') => `<tr data-line="${i}"><td>${hint}${comboHtml(`p${i}`, { placeholder: '— выбрать позицию —' })}
     <div name="new${i}" class="hidden" style="margin-top:4px"><input name="n${i}" placeholder="Название новой позиции" style="width:100%;${inp}"></div>
     <div name="meta${i}" class="row hidden" style="margin-top:4px;gap:6px;flex-wrap:nowrap">${comboHtml(`k${i}`, { style: 'flex:1', placeholder: 'Категория' })}<select name="u${i}" title="Единица" style="width:84px;${inp}">${unitOpts.map(u => `<option value="${u.value}">${u.label}</option>`).join('')}</select></div>
     <div name="info${i}" class="small mute hidden" style="margin-top:3px"></div></td>
@@ -169,7 +169,7 @@ function receiptModal(main, r) {
       tr.dataset.skip = off ? '1' : '';
       tr.style.opacity = off ? '.4' : ''; tr.style.textDecoration = off ? 'line-through' : '';
       b.textContent = off ? '↶' : '×'; b.title = off ? 'Вернуть строку в приход' : 'Не заносить эту строку в приход';
-      tr.querySelectorAll('input,select').forEach(el => el.disabled = off);
+      tr.querySelectorAll('input,select,.combo-btn').forEach(el => el.disabled = off);
     };
   };
   const addLine = (hint = '') => { const i = n++; m.querySelector('#rc-lines').insertAdjacentHTML('beforeend', line(i, hint)); mountLine(i); return i; };
