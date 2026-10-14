@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     AVITO_MANUAL_HOLD_HOURS: int = 24
     # Часы ответов бота по Москве: [START; END). Ночные сообщения получают ответ утром в START:00 + 0…SPREAD мин
     AVITO_HOURS_START: int = 9
-    AVITO_HOURS_END: int = 21
+    AVITO_HOURS_END: int = 23
     AVITO_MORNING_SPREAD_MIN: int = 40
     # Напоминания клиенту, замолчавшему после нашего вопроса: 1-е через 20–26 ч, 2-е через ~3 дня,
     # ещё через AVITO_CLOSE_AFTER_DAYS дней тишины — заявка «Проиграна: не ответил». Отправляются только в окне ниже.
