@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from .. import models as m
 from ..config import settings
 from ..db import SessionLocal
-from . import agent
+from . import agent, timing
 from .notify import esc, telegram
 from .service import active_script, new_script_version
 
@@ -50,7 +50,7 @@ def run_review(db: Session, days: int = 7) -> m.AvitoReview | None:
     if not settings.ANTHROPIC_API_KEY:
         log.info("review: нет ANTHROPIC_API_KEY")
         return None
-    since = datetime.utcnow() - timedelta(days=days)
+    since = timing.utcnow() - timedelta(days=days)
     transcripts, n = _transcripts(db, since)
     if n == 0:
         telegram("📊 Разбор чатов Авито за неделю: переписок не было.")
@@ -83,7 +83,7 @@ def _next_run(now: datetime) -> datetime:
     """Ближайший момент запуска по Москве."""
     target_wd, target_h = settings.AVITO_REVIEW_WEEKDAY, settings.AVITO_REVIEW_HOUR_MSK
     local = now.astimezone(MSK)
-    cand = local.replace(hour=target_h, minute=5, second=0, microsecond=0)
+    cand = local.replace(hour=target_h, minute=0, second=0, microsecond=0)
     days_ahead = (target_wd - local.weekday()) % 7
     cand += timedelta(days=days_ahead)
     if cand <= local:

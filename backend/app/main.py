@@ -8,6 +8,7 @@ from .auth import hash_password
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .avito import review as avito_review
+from .avito import worker as avito_worker
 from .avito.router import router as avito_router
 from .routers import auth, crews, documents, expenses, leads, objects, stats, stock
 
@@ -49,6 +50,7 @@ def startup():
                     db.add(m.Warehouse(name=f"Склад {u.name}", foreman_id=u.id))
             db.commit()
     avito_review.start_scheduler()
+    avito_worker.start()
 
 
 def migrate():
@@ -58,6 +60,8 @@ def migrate():
     wanted = {
         "objects": [("crew_sum_override", "NUMERIC(14,2)"), ("salary_foreman_id", "INTEGER")],
         "material_lines": [("movement_id", "INTEGER")],
+        "avito_chats": [("last_client_at", "TIMESTAMP"), ("last_our_at", "TIMESTAMP"), ("followup_stage", "INTEGER DEFAULT 0"),
+                        ("alerted_at", "TIMESTAMP"), ("notify_msg_id", "INTEGER"), ("notify_json", "TEXT")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

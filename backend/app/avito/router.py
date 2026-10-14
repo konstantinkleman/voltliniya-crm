@@ -1,7 +1,7 @@
 """HTTP: вебхук Авито, управление подпиской, скрипт бота, разбор переписок."""
 import hmac
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -14,7 +14,7 @@ from ..auth import director
 from ..config import settings
 from ..db import SessionLocal, get_db
 from . import review as review_mod
-from . import service
+from . import service, timing
 from .client import AvitoError, client, parse_webhook, webhook_url
 
 log = logging.getLogger("avito.router")
@@ -58,6 +58,9 @@ class StatusOut(BaseModel):
     error: str | None = None
     chats: int = 0
     active_script_version: int | None = None
+    hours: str = ""
+    queue: int = 0
+    failed_7d: int = 0
 
 
 @router.get("/status", response_model=StatusOut)
@@ -68,6 +71,11 @@ def status(_: m.User = Depends(director), db: Session = Depends(get_db)):
                     chats=db.scalar(select(func.count(m.AvitoChat.id))) or 0)
     s = db.scalar(select(m.SalesScript).where(m.SalesScript.is_active == True))  # noqa: E712
     out.active_script_version = s.version if s else None
+    out.hours = f"{settings.AVITO_HOURS_START}:00–{settings.AVITO_HOURS_END}:00 МСК"
+    out.queue = db.scalar(select(func.count(m.AvitoTask.id)).where(m.AvitoTask.status == "pending")) or 0
+    week_ago = timing.utcnow() - timedelta(days=7)
+    out.failed_7d = db.scalar(select(func.count(m.AvitoTask.id)).where(m.AvitoTask.status == "failed",
+                                                                     m.AvitoTask.created_at >= week_ago)) or 0
     if client.configured:
         try:
             out.account_id = client.user_id()
@@ -116,18 +124,52 @@ class ChatOut(BaseModel):
     client_name: str | None
     item_title: str | None
     mode: str
+    manual_until: datetime | None = None
     qualified: str
     handoff_reason: str | None
     last_message_at: datetime | None
     messages: int
+    followup_stage: int = 0
+    next_action: str | None = None       # что бот сделает дальше
+    next_action_at: datetime | None = None
+
+
+def _chat_out(db: Session, c: m.AvitoChat) -> ChatOut:
+    nxt = service.pending_tasks(db, c)
+    t = nxt[0] if nxt else None
+    return ChatOut(id=c.id, chat_id=c.chat_id, lead_id=c.lead_id, client_name=c.client_name, item_title=c.item_title,
+                   mode=c.mode, manual_until=c.manual_until, qualified=c.qualified, handoff_reason=c.handoff_reason,
+                   last_message_at=c.last_message_at, messages=len(c.messages), followup_stage=c.followup_stage or 0,
+                   next_action=m.AVITO_TASK_KINDS.get(t.kind) if t else None, next_action_at=t.due_at if t else None)
 
 
 @router.get("/chats", response_model=list[ChatOut])
 def chats(_: m.User = Depends(director), db: Session = Depends(get_db)):
-    rows = db.scalars(select(m.AvitoChat).order_by(m.AvitoChat.last_message_at.desc().nullslast())).all()
-    return [ChatOut(id=c.id, chat_id=c.chat_id, lead_id=c.lead_id, client_name=c.client_name, item_title=c.item_title,
-                    mode=c.mode, qualified=c.qualified, handoff_reason=c.handoff_reason,
-                    last_message_at=c.last_message_at, messages=len(c.messages)) for c in rows]
+    rows = db.scalars(select(m.AvitoChat).order_by(m.AvitoChat.last_message_at.desc().nullslast()).limit(100)).all()
+    return [_chat_out(db, c) for c in rows]
+
+
+class MessageOut(BaseModel):
+    direction: str
+    author: str
+    text: str
+    created_at: datetime | None
+
+
+class LeadChatOut(BaseModel):
+    chat: ChatOut
+    messages: list[MessageOut]
+
+
+@router.get("/leads/{lead_id}/chat", response_model=LeadChatOut | None)
+def lead_chat(lead_id: int, _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Чат Авито в карточке заявки: переписка и кнопка «Ответить»."""
+    c = db.scalar(select(m.AvitoChat).where(m.AvitoChat.lead_id == lead_id))
+    if not c:
+        return None
+    msgs = [MessageOut(direction=x.direction, author=x.author, text=x.text, created_at=x.created_at)
+            for x in c.messages if x.author != "system"][-50:]
+    return LeadChatOut(chat=_chat_out(db, c), messages=msgs)
 
 
 class ChatMode(BaseModel):
@@ -141,10 +183,15 @@ def set_mode(cid: int, data: ChatMode, _: m.User = Depends(director), db: Sessio
         raise HTTPException(404)
     if data.mode not in ("bot", "manual"):
         raise HTTPException(400, "mode: bot или manual")
-    chat.mode = data.mode
-    chat.manual_until = None
+    now = timing.utcnow()
+    planned = None
+    if data.mode == "manual":
+        chat.mode, chat.manual_until = "manual", None  # вручную — бессрочно, пока не вернёте боту
+        service.cancel_tasks(db, chat)
+    else:
+        planned = service.return_to_bot(db, chat, now)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "reply_planned_at": planned}
 
 
 class SendIn(BaseModel):
@@ -157,18 +204,25 @@ def send(cid: int, data: SendIn, user: m.User = Depends(director), db: Session =
     chat = db.get(m.AvitoChat, cid)
     if not chat:
         raise HTTPException(404)
+    text = data.text.strip()
+    if not text:
+        raise HTTPException(400, "Пустое сообщение")
+    msg = m.AvitoMessage(chat_pk=chat.id, message_id=None, direction="out", author="director", msg_type="text", text=text)
+    db.add(msg)
+    db.commit()  # до отправки — чтобы эхо вебхука узнало сообщение
     try:
-        sent = client.send_text(chat.chat_id, data.text)
+        sent = client.send_text(chat.chat_id, text)
     except AvitoError as e:
+        db.delete(msg)
+        db.commit()
         raise HTTPException(502, str(e))
-    from datetime import timedelta
-    db.add(m.AvitoMessage(chat_pk=chat.id, message_id=str(sent.get("id")) if sent.get("id") else None,
-                          direction="out", author="director", msg_type="text", text=data.text))
-    chat.mode = "manual"
-    chat.manual_until = datetime.utcnow() + timedelta(hours=settings.AVITO_MANUAL_HOLD_HOURS)
-    chat.last_message_at = datetime.utcnow()
+    if sent.get("id") and not msg.message_id:
+        msg.message_id = str(sent["id"])
+    now = timing.utcnow()
+    service.take_over(db, chat, now)
+    chat.last_message_at = now
     if chat.lead:
-        db.add(m.LeadActivity(lead_id=chat.lead.id, kind="message", text=f"Вы (Авито): {data.text}", user_id=user.id))
+        db.add(m.LeadActivity(lead_id=chat.lead.id, kind="message", text=f"Вы (Авито): {text}", user_id=user.id))
     db.commit()
     return {"ok": True}
 

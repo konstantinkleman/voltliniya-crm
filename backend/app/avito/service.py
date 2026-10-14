@@ -1,4 +1,15 @@
-"""Логика обработки входящих сообщений Авито: заявка в CRM → ответ бота → уведомление в Telegram."""
+"""Логика переписки Авито: входящее → заявка в CRM и уведомление сразу → ответ бота с паузой через очередь.
+
+Бот ведёт себя как живой менеджер (раздел 3.3 ТЗ):
+- отвечает с AVITO_HOURS_START до AVITO_HOURS_END по Москве; ночные сообщения — утром со случайным разбросом;
+- пауза перед ответом: первый ответ в чате 2–6 мин, дальше 40 с – 3 мин, длиннее при длинном ответе;
+- клиент дописал, пока бот «думал», — отвечаем одним сообщением на всё;
+- клиент замолчал после нашего вопроса — два напоминания, затем заявка «Проиграна: не ответил»;
+- директор написал в чат сам — бот молчит AVITO_MANUAL_HOLD_HOURS часов;
+- уведомление в Telegram — сразу на каждое входящее; ответ бота дописывается в то же сообщение.
+Отложенные действия живут в таблице avito_tasks, их выполняет worker.py.
+"""
+import json
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -8,14 +19,15 @@ from sqlalchemy.orm import Session
 
 from .. import models as m
 from ..config import settings
-from . import agent
+from . import notify, timing
 from .client import AvitoError, client
 from .default_script import DEFAULT_SCRIPT
-from .notify import esc, telegram
+from .notify import esc
 
 log = logging.getLogger("avito.service")
 
 OBJECT_TYPE_NOTE = {"новостройка": "новостройка", "вторичка": "вторичка", "дом": "частный дом", "коммерция": "коммерческое помещение"}
+DEFAULT_NAME = "Клиент с Авито"
 
 
 # ---------- скрипт ----------
@@ -51,14 +63,14 @@ def activate_script(db: Session, s: m.SalesScript) -> None:
 
 # ---------- чат и заявка ----------
 
-def _lead_url(lead_id: int) -> str:
+def lead_url(lead_id: int) -> str:
     return f"{settings.PUBLIC_URL.rstrip('/')}/#/leads/{lead_id}"
 
 
-def _ensure_chat(db: Session, chat_id: str, item_id: int | None, account_user_id: int | None) -> m.AvitoChat:
+def _ensure_chat(db: Session, chat_id: str, item_id: int | None, account_user_id: int | None) -> tuple[m.AvitoChat, bool]:
     chat = db.scalar(select(m.AvitoChat).where(m.AvitoChat.chat_id == chat_id))
     if chat:
-        return chat
+        return chat, False
     info: dict = {}
     try:
         info = client.chat_info(chat_id)
@@ -78,11 +90,11 @@ def _ensure_chat(db: Session, chat_id: str, item_id: int | None, account_user_id
         item_title=ctx.get("title"),
         item_url=ctx.get("url"),
         mode="bot" if settings.AVITO_BOT_ENABLED else "manual",
+        followup_stage=0,
     )
     db.add(chat)
     db.flush()
-    # заявка в CRM
-    name = chat.client_name or "Клиент с Авито"
+    name = chat.client_name or DEFAULT_NAME
     note = "Авито"
     if chat.item_title:
         note += f" · объявление «{chat.item_title}»"
@@ -92,17 +104,17 @@ def _ensure_chat(db: Session, chat_id: str, item_id: int | None, account_user_id
     db.add(m.LeadActivity(lead_id=lead.id, kind="stage", text="Заявка создана из чата Авито"))
     chat.lead_id = lead.id
     db.flush()
-    return chat
+    return chat, True
 
 
-def _apply_fields(db: Session, chat: m.AvitoChat, fields: dict) -> list[str]:
+def apply_fields(db: Session, chat: m.AvitoChat, fields: dict) -> list[str]:
     """Переносит извлечённые ботом поля в заявку. Возвращает список того, что обновилось."""
     lead = chat.lead
     if not lead or not fields:
         return []
     changed = []
-    if fields.get("name") and (lead.name == "Клиент с Авито" or lead.name == chat.client_name):
-        lead.name = fields["name"]
+    if fields.get("name") and lead.name in (DEFAULT_NAME, chat.client_name):
+        lead.name = str(fields["name"])[:200]
         changed.append(f"имя: {lead.name}")
     if fields.get("phone") and not lead.phone:
         lead.phone = str(fields["phone"])[:50]
@@ -111,7 +123,7 @@ def _apply_fields(db: Session, chat: m.AvitoChat, fields: dict) -> list[str]:
         try:
             lead.area_m2 = Decimal(str(fields["area_m2"]))
             changed.append(f"площадь: {lead.area_m2} м²")
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
     if fields.get("district") and not lead.address:
         lead.address = str(fields["district"])[:300]
@@ -120,6 +132,8 @@ def _apply_fields(db: Session, chat: m.AvitoChat, fields: dict) -> list[str]:
         lead.project_kind = fields["has_project"]
         changed.append(f"проект: {m.PROJECT_KINDS[lead.project_kind]}")
     extra = []
+    if fields.get("has_project") == "none" and "без проекта" not in (lead.note or ""):
+        extra.append("без проекта")
     if fields.get("object_type"):
         extra.append(OBJECT_TYPE_NOTE.get(fields["object_type"], fields["object_type"]))
     if fields.get("start_when"):
@@ -130,17 +144,15 @@ def _apply_fields(db: Session, chat: m.AvitoChat, fields: dict) -> list[str]:
         if e not in (lead.note or ""):
             lead.note = ((lead.note or "") + " · " + e).strip(" ·")
             changed.append(e)
-    if changed and lead.stage == "new":
-        lead.stage = "contacted"
     return changed
 
 
-def _known(chat: m.AvitoChat) -> dict:
+def known_fields(chat: m.AvitoChat) -> dict:
     lead = chat.lead
     if not lead:
         return {}
     return {
-        "имя": lead.name if lead.name not in ("Клиент с Авито", chat.client_name) else None,
+        "имя": lead.name if lead.name not in (DEFAULT_NAME, chat.client_name) else None,
         "телефон": lead.phone,
         "площадь_м2": float(lead.area_m2) if lead.area_m2 else None,
         "адрес": lead.address,
@@ -149,27 +161,190 @@ def _known(chat: m.AvitoChat) -> dict:
     }
 
 
-def _history(chat: m.AvitoChat, limit: int = 40) -> list[dict]:
-    msgs = chat.messages[-limit:]
-    return [{"direction": x.direction, "author": x.author, "text": x.text} for x in msgs if x.author != "system"]
+def history(chat: m.AvitoChat, limit: int = 40) -> list[dict]:
+    msgs = [x for x in chat.messages if x.author != "system"][-limit:]
+    return [{"direction": x.direction, "author": x.author, "text": x.text} for x in msgs]
 
 
-# ---------- главный обработчик ----------
+def last_dialog_message(chat: m.AvitoChat) -> m.AvitoMessage | None:
+    for x in reversed(chat.messages):
+        if x.author != "system":
+            return x
+    return None
+
+
+def client_waiting(chat: m.AvitoChat) -> bool:
+    """Последнее сообщение в чате — от клиента, мы ещё не ответили."""
+    last = last_dialog_message(chat)
+    return bool(last and last.direction == "in")
+
+
+def bot_can_reply(chat: m.AvitoChat, now: datetime) -> bool:
+    """Бот включён и чат не в ручном режиме. Истёкший ручной режим возвращает чат боту."""
+    if not (settings.AVITO_BOT_ENABLED and settings.ANTHROPIC_API_KEY):
+        return False
+    if chat.mode == "manual":
+        if chat.manual_until and chat.manual_until <= now:
+            chat.mode = "bot"
+            chat.manual_until = None
+        else:
+            return False
+    return True
+
+
+# ---------- очередь ----------
+
+def pending_tasks(db: Session, chat: m.AvitoChat, kinds: tuple[str, ...] | None = None) -> list[m.AvitoTask]:
+    q = select(m.AvitoTask).where(m.AvitoTask.chat_pk == chat.id, m.AvitoTask.status == "pending")
+    if kinds:
+        q = q.where(m.AvitoTask.kind.in_(kinds))
+    return list(db.scalars(q.order_by(m.AvitoTask.due_at)).all())
+
+
+def cancel_tasks(db: Session, chat: m.AvitoChat, kinds: tuple[str, ...] | None = None) -> int:
+    n = 0
+    for t in pending_tasks(db, chat, kinds):
+        t.status = "cancelled"
+        t.done_at = timing.utcnow()
+        n += 1
+    return n
+
+
+def add_task(db: Session, chat: m.AvitoChat, kind: str, due_at: datetime, payload: dict | None = None) -> m.AvitoTask:
+    t = m.AvitoTask(chat_pk=chat.id, kind=kind, due_at=due_at, status="pending",
+                    payload=json.dumps(payload, ensure_ascii=False) if payload else None, attempts=0)
+    db.add(t)
+    db.flush()
+    return t
+
+
+def _fit_hours(t: datetime) -> datetime:
+    return timing.fit_window(t, settings.AVITO_HOURS_START, settings.AVITO_HOURS_END, settings.AVITO_MORNING_SPREAD_MIN)
+
+
+def schedule_reply(db: Session, chat: m.AvitoChat, now: datetime) -> datetime:
+    """Запланировать ответ на входящее. Возвращает время, когда бот «начнёт печатать»."""
+    # Ответ уже был готов, но клиент дописал — выбрасываем его и перечитываем переписку целиком.
+    stale = cancel_tasks(db, chat, ("send",))
+    think = pending_tasks(db, chat, ("think",))
+    if think:
+        t = think[0]
+        # Клиент дописывает прямо перед ответом — подождать ещё немного, ответить на всё сразу.
+        if t.due_at - now < timedelta(seconds=45):
+            t.due_at = _fit_hours(now + timing.debounce_delay())
+        return t.due_at
+    first = not any(x.direction == "out" for x in chat.messages)
+    delay = timing.regenerate_delay() if stale else timing.think_delay(first)
+    due = _fit_hours(now + delay)
+    add_task(db, chat, "think", due, {"first": first})
+    return due
+
+
+def schedule_followup(db: Session, chat: m.AvitoChat, stage: int, now: datetime) -> None:
+    if not settings.AVITO_FOLLOWUP_ENABLED:
+        return
+    due = timing.fit_window(now + timing.followup_delay(stage), settings.AVITO_FOLLOWUP_HOURS_START,
+                            settings.AVITO_FOLLOWUP_HOURS_END, 90)
+    add_task(db, chat, "followup", due, {"stage": stage, "after": now.isoformat()})
+
+
+def followup_allowed(chat: m.AvitoChat) -> bool:
+    """Напоминаем только тем, с кем бот ведёт квалификацию сам: не мелочь, не передано руководителю, заявка открыта."""
+    lead = chat.lead
+    return (chat.mode == "bot" and chat.qualified != "no" and not chat.handoff_reason
+            and (lead is None or lead.stage in ("new", "contacted")))
+
+
+# ---------- уведомления ----------
+
+def _head(chat: m.AvitoChat, is_new: bool, handoff: bool = False) -> str:
+    head = "🆕 Новый чат Авито" if is_new else "💬 Авито"
+    if chat.qualified == "yes":
+        head = "🔥 Наш объект · " + head
+    if handoff:
+        head += " · нужен ваш ответ"
+    if chat.mode == "manual":
+        head += " · вы ведёте чат сами"
+    return head
+
+
+def _render(n: dict) -> str:
+    lines = [f"<b>{esc(n['head'])}</b>", f"{esc(n['who'])}", f"«{esc(n['text'][:600])}»"]
+    lines += [x for x in n.get("status", []) if x]
+    if n.get("lead_id"):
+        lines.append(f"Заявка № {n['lead_id']}: {lead_url(n['lead_id'])}")
+    return "\n".join(lines)
+
+
+def _msk(t: datetime) -> str:
+    loc = timing.to_msk(t)
+    today = timing.to_msk(timing.utcnow()).date()
+    return f"{loc:%H:%M}" if loc.date() == today else f"{loc:%d.%m %H:%M}"
+
+
+def notify_incoming(db: Session, chat: m.AvitoChat, text: str, is_new: bool, planned_at: datetime | None) -> None:
+    if planned_at:
+        status = [f"⏳ Бот ответит около {_msk(planned_at)}"]
+    elif chat.mode == "manual":
+        status = ["Бот молчит — ответьте сами в Авито или в CRM"]
+    else:
+        status = ["Бот выключен — ответьте сами"]
+    n = {"head": _head(chat, is_new), "who": f"{chat.client_name or 'Клиент'} — {chat.item_title or 'объявление'}",
+         "text": text, "status": status, "lead_id": chat.lead_id, "is_new": is_new}
+    mid = notify.tg_send(_render(n))
+    chat.notify_msg_id = mid or None
+    chat.notify_json = json.dumps(n, ensure_ascii=False)
+
+
+def notify_bot_reply(db: Session, chat: m.AvitoChat, reply: str, info: dict) -> None:
+    """Дописать ответ бота и итог в уведомление о последнем входящем; при передаче — отдельное сообщение со звуком."""
+    try:
+        n = json.loads(chat.notify_json or "{}")
+    except ValueError:
+        n = {}
+    if not n:
+        return
+    n["head"] = _head(chat, n.get("is_new", False), handoff=bool(info.get("handoff")))
+    status = [f"Бот: «{esc(reply[:700])}»"]
+    if info.get("summary"):
+        status.append(f"Итог: {esc(info['summary'][:300])}")
+    n["status"] = status
+    chat.notify_json = json.dumps(n, ensure_ascii=False)
+    if chat.notify_msg_id:
+        notify.tg_edit(chat.notify_msg_id, _render(n))
+    else:
+        notify.tg_send(_render(n))
+    if info.get("handoff"):
+        lead = chat.lead
+        lines = [f"<b>🙋 Нужен ваш ответ · Авито</b>", esc(f"{lead.name if lead else chat.client_name or 'Клиент'} — {chat.item_title or 'объявление'}")]
+        if info.get("handoff_reason"):
+            lines.append(f"Причина: {esc(info['handoff_reason'][:200])}")
+        if info.get("summary"):
+            lines.append(f"Итог: {esc(info['summary'][:300])}")
+        if lead and lead.phone:
+            lines.append(f"Телефон: {esc(lead.phone)}")
+        if lead and lead.note:
+            lines.append(esc(lead.note[:300]))
+        if chat.lead_id:
+            lines.append(f"Заявка № {chat.lead_id}: {lead_url(chat.lead_id)}")
+        notify.tg_send("\n".join(lines))
+
+
+# ---------- входящие ----------
 
 def handle_incoming(db: Session, ev: dict) -> None:
     """ev — результат client.parse_webhook. Вызывается в фоне, после ответа 200 Авито."""
     if ev["message_id"] and db.scalar(select(m.AvitoMessage).where(m.AvitoMessage.message_id == ev["message_id"])):
-        return  # дубль вебхука или эхо нашего же сообщения, отправленного через API
+        return  # дубль вебхука или эхо нашего сообщения, отправленного через API
     account_id = ev.get("account_user_id")
     try:
         if account_id is None:
             account_id = client.user_id()
     except AvitoError as e:
         log.warning("user_id: %s", e)
-    chat = _ensure_chat(db, ev["chat_id"], ev.get("item_id"), account_id)
-    is_new_chat = len(chat.messages) == 0
+    chat, is_new = _ensure_chat(db, ev["chat_id"], ev.get("item_id"), account_id)
     outgoing = account_id is not None and ev.get("author_id") is not None and int(ev["author_id"]) == int(account_id)
-    now = datetime.utcnow()
+    now = timing.utcnow()
 
     if ev.get("type") == "system" or ev.get("flow_id"):
         db.add(m.AvitoMessage(chat_pk=chat.id, message_id=ev["message_id"] or None, direction="in", author="system",
@@ -178,16 +353,16 @@ def handle_incoming(db: Session, ev: dict) -> None:
         return
 
     if outgoing:
-        # Наше сообщение. Если его отправил не бот (бот пишет через API и сам сохраняет) — это директор из приложения.
-        sent_by_bot = db.scalar(select(m.AvitoMessage).where(m.AvitoMessage.chat_pk == chat.id, m.AvitoMessage.direction == "out",
-                                                           m.AvitoMessage.text == ev["text"], m.AvitoMessage.message_id == None))  # noqa: E711
-        if sent_by_bot:
-            sent_by_bot.message_id = ev["message_id"] or None
+        # Наше сообщение. Бот и кнопка «Ответить» в CRM сохраняют своё сообщение до отправки — найдём его.
+        ours = db.scalar(select(m.AvitoMessage).where(m.AvitoMessage.chat_pk == chat.id, m.AvitoMessage.direction == "out",
+                                                     m.AvitoMessage.text == ev["text"], m.AvitoMessage.message_id == None))  # noqa: E711
+        if ours:
+            ours.message_id = ev["message_id"] or None
         else:
+            # Директор написал из приложения Авито — бот замолкает, напоминания отменяются.
             db.add(m.AvitoMessage(chat_pk=chat.id, message_id=ev["message_id"] or None, direction="out", author="director",
                                   msg_type=ev["type"], text=ev["text"]))
-            chat.mode = "manual"
-            chat.manual_until = now + timedelta(hours=settings.AVITO_MANUAL_HOLD_HOURS)
+            take_over(db, chat, now)
             if chat.lead:
                 db.add(m.LeadActivity(lead_id=chat.lead.id, kind="message", text=f"Вы (Авито): {ev['text']}"))
         chat.last_message_at = now
@@ -198,68 +373,34 @@ def handle_incoming(db: Session, ev: dict) -> None:
     db.add(m.AvitoMessage(chat_pk=chat.id, message_id=ev["message_id"] or None, direction="in", author="client",
                           msg_type=ev["type"], text=ev["text"]))
     chat.last_message_at = now
+    chat.last_client_at = now
+    chat.followup_stage = 0
+    cancel_tasks(db, chat, ("followup", "close"))
     if chat.lead:
         db.add(m.LeadActivity(lead_id=chat.lead.id, kind="message", text=f"Клиент (Авито): {ev['text']}"))
-    db.commit()
+    db.flush()
     db.refresh(chat)
-    client.mark_read(chat.chat_id)
 
-    bot_allowed = settings.AVITO_BOT_ENABLED and (chat.mode == "bot" or (chat.manual_until and chat.manual_until < now))
-    if chat.mode == "manual" and chat.manual_until and chat.manual_until < now and settings.AVITO_BOT_ENABLED:
-        chat.mode = "bot"
-        chat.manual_until = None
+    planned = schedule_reply(db, chat, now) if bot_can_reply(chat, now) else None
+    db.commit()
+    notify_incoming(db, chat, ev["text"], is_new, planned)
+    db.commit()
 
-    reply_text, result = "", None
-    if bot_allowed and settings.ANTHROPIC_API_KEY:
-        try:
-            script = active_script(db)
-            result = agent.run(script.text, _history(chat), {"item_title": chat.item_title, "client_name": chat.client_name, "known": _known(chat)})
-        except Exception as e:  # noqa: BLE001 — бот не должен ронять вебхук
-            log.exception("agent: %s", e)
-            result = None
-        if result:
-            changed = _apply_fields(db, chat, result.fields)
-            if changed and chat.lead:
-                db.add(m.LeadActivity(lead_id=chat.lead.id, kind="note", text="Бот обновил заявку: " + ", ".join(changed)))
-            if result.qualified != "unknown":
-                chat.qualified = result.qualified
-            if result.handoff:
-                chat.handoff_reason = result.handoff_reason[:300] if result.handoff_reason else "передано руководителю"
-                if chat.lead and chat.qualified == "yes" and chat.lead.stage in ("new", "contacted"):
-                    chat.lead.stage = "contacted"
-            if result.qualified == "no" and chat.lead and chat.lead.stage == "new":
-                pass  # отказ не закрываем автоматически — директор решает сам
-            reply_text = result.reply
-            if reply_text:
-                try:
-                    sent = client.send_text(chat.chat_id, reply_text)
-                    db.add(m.AvitoMessage(chat_pk=chat.id, message_id=str(sent.get("id")) if sent.get("id") else None,
-                                          direction="out", author="bot", msg_type="text", text=reply_text))
-                    if chat.lead:
-                        db.add(m.LeadActivity(lead_id=chat.lead.id, kind="message", text=f"Бот (Авито): {reply_text}"))
-                except AvitoError as e:
-                    log.warning("send_text: %s", e)
-                    reply_text = ""
-            db.commit()
 
-    # уведомление в Telegram — на каждое входящее
-    lead_id = chat.lead.id if chat.lead else None
-    head = "🆕 Новый чат Авито" if is_new_chat else "💬 Авито"
-    if result and result.qualified == "yes":
-        head = "🔥 " + head
-    if result and result.handoff:
-        head += " · нужен ваш ответ"
-    if chat.mode == "manual":
-        head += " · вы ведёте чат сами"
-    lines = [f"<b>{head}</b>",
-             f"{esc(chat.client_name or 'Клиент')} — {esc(chat.item_title or 'объявление')}",
-             f"«{esc(ev['text'][:500])}»"]
-    if reply_text:
-        lines.append(f"Бот: «{esc(reply_text[:400])}»")
-    if result and result.summary:
-        lines.append(f"Итог: {esc(result.summary[:300])}")
-    if result and result.handoff and result.handoff_reason:
-        lines.append(f"Причина передачи: {esc(result.handoff_reason[:200])}")
-    if lead_id:
-        lines.append(f"Заявка № {lead_id}: {_lead_url(lead_id)}")
-    telegram("\n".join(lines))
+def take_over(db: Session, chat: m.AvitoChat, now: datetime) -> None:
+    """Директор ответил сам: бот молчит AVITO_MANUAL_HOLD_HOURS часов и не вмешивается."""
+    indefinite = chat.mode == "manual" and chat.manual_until is None  # «вести самому» из CRM — бессрочно, не сокращаем
+    chat.mode = "manual"
+    chat.manual_until = None if indefinite else now + timedelta(hours=settings.AVITO_MANUAL_HOLD_HOURS)
+    chat.last_our_at = now
+    chat.followup_stage = 0
+    cancel_tasks(db, chat)
+
+
+def return_to_bot(db: Session, chat: m.AvitoChat, now: datetime) -> datetime | None:
+    """Директор вернул чат боту. Если клиент ждёт ответа — бот ответит с обычной паузой."""
+    chat.mode = "bot"
+    chat.manual_until = None
+    if client_waiting(chat) and bot_can_reply(chat, now):
+        return schedule_reply(db, chat, now)
+    return None

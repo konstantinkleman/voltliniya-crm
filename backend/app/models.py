@@ -31,7 +31,7 @@ LEAD_STAGE_NAMES = {
     "new": "Новая", "contacted": "Связались", "measure": "Замер",
     "offer_sent": "Смета отправлена", "won": "Договор", "lost": "Проиграна",
 }
-LOST_REASONS = ["дорого", "не дозвонились", "выбрали других", "передумали делать ремонт", "не наш профиль", "другое"]
+LOST_REASONS = ["дорого", "не дозвонились", "не ответил", "выбрали других", "передумали делать ремонт", "не наш профиль", "другое"]
 
 OBJECT_STAGES = ["contract", "purchase", "install", "panel", "handover", "act", "warranty"]
 OBJECT_STAGE_NAMES = {
@@ -357,7 +357,8 @@ class StockMovement(Base):
     product: Mapped["Product"] = relationship()
     object: Mapped["WorkObject | None"] = relationship()
     user: Mapped["User | None"] = relationship()
-=======
+
+
 # ---------- Авито: чаты, сообщения, скрипт бота ----------
 
 class AvitoChat(Base, TimestampMixin):
@@ -376,6 +377,12 @@ class AvitoChat(Base, TimestampMixin):
     qualified: Mapped[str] = mapped_column(String(10), default="unknown")  # yes / no / unknown
     handoff_reason: Mapped[str | None] = mapped_column(String(300))
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_client_at: Mapped[datetime | None] = mapped_column(DateTime)   # последнее сообщение клиента (UTC)
+    last_our_at: Mapped[datetime | None] = mapped_column(DateTime)      # последнее наше сообщение — бот или директор (UTC)
+    followup_stage: Mapped[int] = mapped_column(Integer, default=0)     # сколько напоминаний отправлено после нашего вопроса
+    alerted_at: Mapped[datetime | None] = mapped_column(DateTime)       # last_client_at, по которому уже был алерт «клиент ждёт»
+    notify_msg_id: Mapped[int | None] = mapped_column(Integer)          # Telegram-уведомление о последнем входящем (правится ответом бота)
+    notify_json: Mapped[str | None] = mapped_column(Text)
 
     lead: Mapped["Lead | None"] = relationship()
     messages: Mapped[list["AvitoMessage"]] = relationship(back_populates="chat", order_by="AvitoMessage.id", cascade="all, delete-orphan")
@@ -393,6 +400,26 @@ class AvitoMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     chat: Mapped["AvitoChat"] = relationship(back_populates="messages")
+
+
+AVITO_TASK_KINDS = {"think": "подготовить ответ", "send": "отправить ответ", "followup": "напоминание", "close": "закрыть заявку"}
+
+
+class AvitoTask(Base):
+    """Очередь отложенных действий бота: ответ с паузой, второе сообщение, напоминание, закрытие заявки."""
+    __tablename__ = "avito_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_pk: Mapped[int] = mapped_column(ForeignKey("avito_chats.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    due_at: Mapped[datetime] = mapped_column(DateTime, index=True)       # UTC
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)  # pending/running/done/cancelled/failed
+    payload: Mapped[str | None] = mapped_column(Text)                    # JSON
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    chat: Mapped["AvitoChat"] = relationship()
 
 
 class SalesScript(Base):

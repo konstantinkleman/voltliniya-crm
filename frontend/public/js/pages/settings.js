@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { esc, num, toast, formModal, dateTimeRu, confirmModal } from '../ui.js';
+import { esc, num, toast, formModal, dateTimeRu, confirmModal, utc } from '../ui.js';
 
 export async function render(main, r, state) {
   const D = state.dicts;
@@ -40,14 +40,16 @@ async function renderAvito(card) {
     <tr><td>Вебхук подписан</td><td class="r">${st.subscribed === null ? '<span class="tag">нет данных</span>' : yes(st.subscribed)} ${st.configured ? `<button class="btn s" data-sub>${st.subscribed ? 'Переподписать' : 'Подписать'}</button>` : ''}</td></tr>
     <tr><td>Бот отвечает сам</td><td class="r">${yes(st.bot_enabled && st.anthropic)}${!st.anthropic ? ' <span class="small mute">нет ANTHROPIC_API_KEY</span>' : ''}</td></tr>
     <tr><td>Telegram-уведомления</td><td class="r">${yes(st.telegram)} ${st.telegram ? '<button class="btn s" data-tg>Проверить</button>' : ''}</td></tr>
+    <tr><td>Часы ответов бота</td><td class="r">${esc(st.hours)} <span class="small mute">ночью — ответ утром</span></td></tr>
     <tr><td>Чатов в CRM</td><td class="r num">${st.chats}</td></tr>
+    <tr><td>В очереди бота</td><td class="r num">${st.queue}${st.failed_7d ? ` <span class="tag warn">сбоев за неделю: ${st.failed_7d}</span>` : ''}</td></tr>
     <tr><td>Скрипт бота</td><td class="r">версия ${active ? active.version : '—'} <button class="btn s" data-script>Открыть</button></td></tr>
   </table>
   ${st.error ? `<div class="small" style="color:#c33;margin-top:6px">${esc(st.error)}</div>` : ''}
   ${drafts.length ? `<div style="margin-top:10px"><b>Черновики после разбора переписок:</b> ${drafts.map(d => `<div class="small">v${d.version} · ${dateTimeRu(d.created_at)} · ${esc(d.note || '')} <button class="btn s" data-activate="${d.id}">Включить</button></div>`).join('')}</div>` : ''}
   <div class="small mute" style="margin-top:8px">Адрес вебхука: <code>${esc(st.webhook_url)}</code>. Ключи и токены задаются в <code>.env</code> на сервере. Разбор переписок — раз в неделю, отчёт приходит в Telegram; <button class="btn s" data-review>запустить сейчас</button></div>
   ${chats.length ? `<h3 style="margin-top:14px">Последние чаты</h3><table><tr><th>Клиент</th><th>Объявление</th><th>Режим</th><th>Квалификация</th><th>Заявка</th><th></th></tr>
-    ${chats.slice(0, 15).map(c => `<tr><td>${esc(c.client_name || '—')}<br><small class="mute">${dateTimeRu(c.last_message_at)}</small></td><td>${esc(c.item_title || '—')}</td><td>${c.mode === 'bot' ? 'бот' : 'вы'}</td><td>${{ yes: '<span class="tag act">наш</span>', no: '<span class="tag warn">мелочь</span>' }[c.qualified] || '—'}${c.handoff_reason ? `<br><small class="mute">${esc(c.handoff_reason)}</small>` : ''}</td><td>${c.lead_id ? `<a href="#/leads/${c.lead_id}">№ ${c.lead_id}</a>` : '—'}</td><td class="r"><button class="btn s" data-mode="${c.id}" data-to="${c.mode === 'bot' ? 'manual' : 'bot'}">${c.mode === 'bot' ? 'Вести самому' : 'Вернуть боту'}</button></td></tr>`).join('')}</table>` : ''}`;
+    ${chats.slice(0, 15).map(c => `<tr><td>${esc(c.client_name || '—')}<br><small class="mute">${dateTimeRu(utc(c.last_message_at))}</small></td><td>${esc(c.item_title || '—')}</td><td>${c.mode === 'bot' ? 'бот' : 'вы'}${c.next_action_at ? `<br><small class="mute">${esc(c.next_action)} ${dateTimeRu(utc(c.next_action_at))}</small>` : ''}</td><td>${{ yes: '<span class="tag act">наш</span>', no: '<span class="tag warn">мелочь</span>' }[c.qualified] || '—'}${c.handoff_reason ? `<br><small class="mute">${esc(c.handoff_reason)}</small>` : ''}</td><td>${c.lead_id ? `<a href="#/leads/${c.lead_id}">№ ${c.lead_id}</a>` : '—'}</td><td class="r"><button class="btn s" data-mode="${c.id}" data-to="${c.mode === 'bot' ? 'manual' : 'bot'}">${c.mode === 'bot' ? 'Вести самому' : 'Вернуть боту'}</button></td></tr>`).join('')}</table>` : ''}`;
   const act = async (fn, okMsg) => { try { await fn(); toast(okMsg); renderAvito(card); } catch (e) { toast(e.message, true); } };
   card.querySelector('[data-sub]')?.addEventListener('click', () => act(() => api.post('/api/avito/subscribe', {}), 'Вебхук подписан'));
   card.querySelector('[data-tg]')?.addEventListener('click', () => act(() => api.post('/api/avito/test-telegram', {}), 'Отправлено в Telegram'));

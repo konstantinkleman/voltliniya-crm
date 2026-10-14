@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     AVITO_BOT_ENABLED: bool = True
     # Сколько часов бот молчит в чате после того, как в нём вручную написал директор
     AVITO_MANUAL_HOLD_HOURS: int = 24
+    # Часы ответов бота по Москве: [START; END). Ночные сообщения получают ответ утром в START:00 + 0…SPREAD мин
+    AVITO_HOURS_START: int = 9
+    AVITO_HOURS_END: int = 23
+    AVITO_MORNING_SPREAD_MIN: int = 40
+    # Напоминания клиенту, замолчавшему после нашего вопроса: 1-е через 20–26 ч, 2-е через ~3 дня,
+    # ещё через AVITO_CLOSE_AFTER_DAYS дней тишины — заявка «Проиграна: не ответил». Отправляются только в окне ниже.
+    AVITO_FOLLOWUP_ENABLED: bool = True
+    AVITO_FOLLOWUP_HOURS_START: int = 10
+    AVITO_FOLLOWUP_HOURS_END: int = 20
+    AVITO_CLOSE_AFTER_DAYS: int = 3
+    # Алерт «клиент ждёт ответа»: бот не ответил за N минут рабочего времени (сбой) / вы ведёте чат и не ответили за M минут
+    AVITO_ALERT_BOT_MIN: int = 15
+    AVITO_ALERT_MANUAL_MIN: int = 60
 
     # Уведомления в Telegram (бот → личный чат директора)
     TELEGRAM_BOT_TOKEN: str = ""
@@ -36,6 +49,8 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-sonnet-5-5"
     # Еженедельный разбор переписок: день недели (0 = понедельник) и час по Москве
     AVITO_REVIEW_WEEKDAY: int = 0
+    # Фоновый обработчик очереди бота (отключается в тестах, там очередь крутится вручную)
+    AVITO_WORKER_ENABLED: bool = True
     AVITO_REVIEW_HOUR_MSK: int = 9
 
 
