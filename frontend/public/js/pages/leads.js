@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { crewField, bindCrewFilter, esc, fmt, num, dateRu, dateTimeRu, srcClass, toast, openDrawer, closeDrawer, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
+import { crewField, bindCrewFilter, esc, fmt, num, dateRu, dateTimeRu, srcClass, toast, openDrawer, closeDrawer, formModal, confirmModal, opt, emptyState, today, utc } from '../ui.js';
 import { docsBlock, uploadDoc } from './docs.js';
 
 let S, D;
@@ -74,9 +74,11 @@ async function openLead(id) {
       <button class="btn" data-edit>Изменить</button>
     </div>
     <div id="lead-docs"></div>
+    ${l.source === 'avito' ? '<div id="lead-avito"></div>' : ''}
     <div class="row sp" style="margin-top:20px"><h3>История</h3><button class="btn s" data-act>+ запись</button></div>
     <ul class="timeline">${l.activities.map(a => `<li>${esc(a.text)}<small>${dateTimeRu(a.created_at)}${a.user_name ? ' · ' + esc(a.user_name) : ''}</small></li>`).join('') || '<li class="mute">Пусто</li>'}</ul>
   `);
+  if (l.source === 'avito') avitoBlock(d.querySelector('#lead-avito'), l.id, () => openLead(id));
   docsBlock(d.querySelector('#lead-docs'), l.documents, { lead_id: l.id }, () => openLead(id), open ? 'Прикрепите КП на этапе «Смета отправлена», договор — при подписании.' : '');
   d.querySelector('[data-next]')?.addEventListener('click', async () => {
     if (next === 'offer_sent') {
@@ -138,4 +140,26 @@ function showClosed(list) {
   openDrawer(`<h2>Закрытые заявки</h2><table style="margin-top:12px"><tr><th>Кто</th><th>Канал</th><th>Итог</th></tr>
     ${list.map(l => `<tr class="click" data-id="${l.id}"><td>${esc(l.name)}<div class="small mute">${dateRu(l.updated_at)}</div></td><td><span class="src ${srcClass(l.source)}">${esc(D.sources[l.source])}</span></td><td>${l.stage === 'won' ? `<span class="tag ok">договор</span>` : `<span class="tag warn">${esc(l.lost_reason || 'проиграна')}</span>`}</td></tr>`).join('') || '<tr><td colspan="3" class="mute">Пусто</td></tr>'}</table>`)
     .querySelectorAll('tr.click').forEach(tr => tr.onclick = () => openLead(Number(tr.dataset.id)));
+}
+
+
+// Чат Авито в карточке заявки: последние сообщения, ответ от своего имени (бот замолкает на 24 ч), режим бота.
+async function avitoBlock(el, leadId, reload) {
+  let data;
+  try { data = await api.get(`/api/avito/leads/${leadId}/chat`); } catch (e) { el.innerHTML = ''; return; }
+  if (!data) { el.innerHTML = ''; return; }
+  const c = data.chat;
+  const who = { client: 'Клиент', bot: 'Бот', director: 'Вы' };
+  const modeTxt = c.mode === 'bot' ? 'отвечает бот' : (c.manual_until ? `бот молчит до ${dateTimeRu(utc(c.manual_until))}` : 'ведёте вы');
+  el.innerHTML = `<div class="row sp" style="margin-top:20px"><h3>Чат Авито</h3><span class="small mute">${esc(modeTxt)}${c.next_action_at ? ` · ${esc(c.next_action)} ${dateTimeRu(utc(c.next_action_at))}` : ''}</span></div>
+    <ul class="timeline">${data.messages.slice(-12).map(x => `<li><b>${esc(who[x.author] || x.author)}:</b> ${esc(x.text)}<small>${dateTimeRu(utc(x.created_at))}</small></li>`).join('') || '<li class="mute">Пусто</li>'}</ul>
+    <div class="row"><button class="btn p" data-av-send>Ответить в Авито</button>
+      <button class="btn" data-av-mode="${c.mode === 'bot' ? 'manual' : 'bot'}">${c.mode === 'bot' ? 'Вести самому' : 'Вернуть боту'}</button></div>`;
+  el.querySelector('[data-av-send]').onclick = () => formModal({ title: 'Ответ клиенту в Авито', submit: 'Отправить',
+    intro: 'Уйдёт от имени компании в чат Авито. Бот в этом чате замолчит на сутки и не будет вмешиваться.',
+    fields: [{ name: 'text', label: 'Сообщение (без телефонов и ссылок — Авито блокирует)', type: 'textarea', required: true }],
+    onSubmit: async (v) => { await api.post(`/api/avito/chats/${c.id}/send`, { text: v.text }); toast('Отправлено'); reload(); } });
+  el.querySelector('[data-av-mode]').onclick = async (e) => {
+    try { await api.post(`/api/avito/chats/${c.id}/mode`, { mode: e.target.dataset.avMode }); toast('Режим изменён'); reload(); } catch (err) { toast(err.message, true); }
+  };
 }

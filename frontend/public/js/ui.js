@@ -11,6 +11,8 @@ export const num = (n, d = 0) => (n === null || n === undefined) ? '—' : new I
 export const pct = (a, b) => (b && Number(b)) ? Math.round(Number(a) / Number(b) * 100) + '%' : '—';
 export const dateRu = (s) => { if (!s) return '—'; const d = new Date(s); return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }); };
 export const dateTimeRu = (s) => { if (!s) return ''; const d = new Date(s); return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+// даты чатов Авито хранятся в UTC без пояса — помечаем, чтобы браузер показал местное время
+export const utc = (s) => !s ? s : (/([zZ]|[+-]\d\d:?\d\d)$/.test(s) ? s : s + 'Z');
 export const today = () => new Date().toISOString().slice(0, 10);
 export const monthKey = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 export const monthName = (key) => { const [y, m] = key.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }); };

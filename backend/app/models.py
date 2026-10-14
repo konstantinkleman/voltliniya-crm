@@ -31,7 +31,7 @@ LEAD_STAGE_NAMES = {
     "new": "Новая", "contacted": "Связались", "measure": "Замер",
     "offer_sent": "Смета отправлена", "won": "Договор", "lost": "Проиграна",
 }
-LOST_REASONS = ["дорого", "не дозвонились", "выбрали других", "передумали делать ремонт", "не наш профиль", "другое"]
+LOST_REASONS = ["дорого", "не дозвонились", "не ответил", "выбрали других", "передумали делать ремонт", "не наш профиль", "другое"]
 
 OBJECT_STAGES = ["contract", "purchase", "install", "panel", "handover", "act", "warranty"]
 OBJECT_STAGE_NAMES = {
@@ -286,8 +286,7 @@ class Document(Base):
     user: Mapped["User | None"] = relationship()
 
 
-# ======================= СКЛАД =======================
-
+# ======================= СКЛАД ================
 class Warehouse(Base, TimestampMixin):
     """Склад прораба. Главного склада нет: приход сразу на склад конкретного прораба."""
     __tablename__ = "warehouses"
@@ -358,3 +357,89 @@ class StockMovement(Base):
     product: Mapped["Product"] = relationship()
     object: Mapped["WorkObject | None"] = relationship()
     user: Mapped["User | None"] = relationship()
+
+
+# ---------- Авито: чаты, сообщения, скрипт бота ----------
+
+class AvitoChat(Base, TimestampMixin):
+    """Чат Авито по объявлению; привязан к заявке. mode: bot — отвечает бот, manual — директор ведёт сам."""
+    __tablename__ = "avito_chats"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), index=True)
+    client_user_id: Mapped[int | None] = mapped_column(Integer)
+    client_name: Mapped[str | None] = mapped_column(String(200))
+    item_id: Mapped[int | None] = mapped_column(Integer)
+    item_title: Mapped[str | None] = mapped_column(String(300))
+    item_url: Mapped[str | None] = mapped_column(String(500))
+    mode: Mapped[str] = mapped_column(String(10), default="bot")
+    manual_until: Mapped[datetime | None] = mapped_column(DateTime)
+    qualified: Mapped[str] = mapped_column(String(10), default="unknown")  # yes / no / unknown
+    handoff_reason: Mapped[str | None] = mapped_column(String(300))
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_client_at: Mapped[datetime | None] = mapped_column(DateTime)   # последнее сообщение клиента (UTC)
+    last_our_at: Mapped[datetime | None] = mapped_column(DateTime)      # последнее наше сообщение — бот или директор (UTC)
+    followup_stage: Mapped[int] = mapped_column(Integer, default=0)     # сколько напоминаний отправлено после нашего вопроса
+    alerted_at: Mapped[datetime | None] = mapped_column(DateTime)       # last_client_at, по которому уже был алерт «клиент ждёт»
+    notify_msg_id: Mapped[int | None] = mapped_column(Integer)          # Telegram-уведомление о последнем входящем (правится ответом бота)
+    notify_json: Mapped[str | None] = mapped_column(Text)
+
+    lead: Mapped["Lead | None"] = relationship()
+    messages: Mapped[list["AvitoMessage"]] = relationship(back_populates="chat", order_by="AvitoMessage.id", cascade="all, delete-orphan")
+
+
+class AvitoMessage(Base):
+    __tablename__ = "avito_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_pk: Mapped[int] = mapped_column(ForeignKey("avito_chats.id"), index=True)
+    message_id: Mapped[str | None] = mapped_column(String(100), unique=True)
+    direction: Mapped[str] = mapped_column(String(5))  # in — клиент, out — мы
+    author: Mapped[str] = mapped_column(String(10), default="client")  # client / bot / director / system
+    msg_type: Mapped[str] = mapped_column(String(20), default="text")
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    chat: Mapped["AvitoChat"] = relationship(back_populates="messages")
+
+
+AVITO_TASK_KINDS = {"think": "подготовить ответ", "send": "отправить ответ", "followup": "напоминание", "close": "закрыть заявку"}
+
+
+class AvitoTask(Base):
+    """Очередь отложенных действий бота: ответ с паузой, второе сообщение, напоминание, закрытие заявки."""
+    __tablename__ = "avito_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_pk: Mapped[int] = mapped_column(ForeignKey("avito_chats.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    due_at: Mapped[datetime] = mapped_column(DateTime, index=True)       # UTC
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)  # pending/running/done/cancelled/failed
+    payload: Mapped[str | None] = mapped_column(Text)                    # JSON
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    chat: Mapped["AvitoChat"] = relationship()
+
+
+class SalesScript(Base):
+    """Версии скрипта бота-продажника. Активна ровно одна; черновики создаёт еженедельный разбор."""
+    __tablename__ = "sales_scripts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, index=True)
+    text: Mapped[str] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)        # что изменено и почему
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(30), default="director")  # director / review
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AvitoReview(Base):
+    """Отчёт еженедельного разбора переписок."""
+    __tablename__ = "avito_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    period_from: Mapped[Date] = mapped_column(Date)
+    period_to: Mapped[Date] = mapped_column(Date)
+    report: Mapped[str] = mapped_column(Text)
+    draft_script_id: Mapped[int | None] = mapped_column(ForeignKey("sales_scripts.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
