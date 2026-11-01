@@ -113,13 +113,19 @@ def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
 
 
 @router.get("/crews")
-def crews_stats(month: str | None = None, _: m.User = Depends(director), db: Session = Depends(get_db)):
-    """Сколько заработала каждая бригада (её доля) и сколько осталось компании с её объектов — за месяц сделки и за всё время."""
+def crews_stats(month: str | None = None, date_from: str | None = None, date_to: str | None = None,
+                _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Сколько заработала каждая бригада (её доля) и сколько осталось компании с её объектов.
+    Период — по месяцу договора: month=YYYY-MM (один месяц) или date_from/date_to=YYYY-MM (диапазон включительно); плюс всегда «за всё время»."""
     (y, mo), start, end = _bounds(month)
+    lo = tuple(map(int, date_from.split("-"))) if date_from else (y, mo)
+    hi = tuple(map(int, date_to.split("-"))) if date_to else (lo if date_from else (y, mo))
+    if lo > hi:
+        lo, hi = hi, lo
     crews = db.scalars(select(m.Crew).order_by(m.Crew.id)).all()
     objs = db.scalars(select(m.WorkObject)).all()
     leads = {l.object_id: l for l in db.scalars(select(m.Lead).where(m.Lead.object_id.is_not(None))).all()}
-    in_month = {o.id for o in objs if deal_month(o, leads.get(o.id)) == (y, mo)}
+    in_month = {o.id for o in objs if lo <= deal_month(o, leads.get(o.id)) <= hi}
     out = []
     groups = [(c.id, c.name, c.foreman.name if c.foreman else None, c.is_active) for c in crews]
     if any(o.crew_id is None for o in objs):

@@ -92,6 +92,10 @@ with c:
     cs = get(f"/api/stats/crews?month={M}"); b1 = [x for x in cs if x["name"] == "Бригада № 1"][0]
     assert b1["month"]["objects"] == 1 and float(b1["month"]["crew"]) == float(od["finance"]["crew_plan"]) and float(b1["month"]["profit"]) == float(od["finance"]["profit"]), b1["month"]
     assert b1["month"]["items"][0]["client_name"] == od["client_name"] and b1["total"]["objects"] >= 1
+    # диапазон месяцев: текущий входит, прошлый год — нет
+    y = int(M[:4])
+    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={M}") if x["name"] == "Бригада № 1"][0]["month"]["objects"] == 1
+    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={y-1}-12") if x["name"] == "Бригада № 1"][0]["month"]["objects"] == 0
     sm = get(f"/api/stats/summary?month={M}"); print("сводка:", sm)
     assert float(sm["received"]) == 96000 and float(sm["crew_payouts"]) == 40000
 print("SMOKE OK")

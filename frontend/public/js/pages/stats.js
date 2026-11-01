@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { esc, fmt, num, pct, srcClass, monthKey, monthName, emptyState } from '../ui.js';
+import { esc, fmt, num, pct, srcClass, monthKey, monthName, emptyState, dateRu } from '../ui.js';
 import { monthPicker } from './crews.js';
 
 export async function render(main, r, state) {
@@ -42,24 +42,38 @@ export async function render(main, r, state) {
 }
 
 // ---------- бригады: что заработала бригада и что осталось компании ----------
-let crewPeriod = 'month';
-function crewsBlock(el, cr, month, D) {
-  const rows = cr.filter(c => c[crewPeriod].objects || (c.is_active && crewPeriod === 'total'));
-  const T = rows.reduce((a, c) => { const x = c[crewPeriod]; for (const k of ['objects', 'works', 'revenue', 'crew', 'crew_paid', 'crew_due', 'materials', 'profit']) a[k] = (a[k] || 0) + Number(x[k]); return a; }, {});
+// Период: месяц аналитики, произвольный диапазон месяцев (по месяцу договора) или всё время.
+let crewPeriod = 'month', crewFrom = null, crewTo = null;
+async function crewsBlock(el, base, month, D) {
+  let cr = base;   // base — данные за месяц аналитики и за всё время; для диапазона запрашиваем отдельно
+  if (crewPeriod === 'range') {
+    crewFrom = crewFrom || month; crewTo = crewTo || month;
+    if (crewFrom > crewTo) [crewFrom, crewTo] = [crewTo, crewFrom];
+    el.innerHTML = '<div class="pad mute">Считаю…</div>';
+    cr = await api.get(`/api/stats/crews?date_from=${crewFrom}&date_to=${crewTo}`);
+  }
+  const key = crewPeriod === 'total' ? 'total' : 'month';
+  const rows = cr.filter(c => c[key].objects || (c.is_active && crewPeriod === 'total'));
+  const T = rows.reduce((a, c) => { const x = c[key]; for (const k of ['objects', 'works', 'revenue', 'crew', 'crew_paid', 'crew_due', 'materials', 'profit']) a[k] = (a[k] || 0) + Number(x[k]); return a; }, {});
   const sign = (v) => Number(v) < 0 ? 'warn' : '';
-  el.innerHTML = `<div class="pad row sp" style="padding-bottom:0"><div><h2>Бригады</h2><div class="small mute">Бригаде — её доля с работ (55% или по договорённости); компании — прибыль объектов после материалов, бригады, доли зарплаты прораба и стоимости клиента</div></div>
-      <div class="seg"><button class="${crewPeriod === 'month' ? 'on' : ''}" data-cp="month">${esc(monthName(month))}</button><button class="${crewPeriod === 'total' ? 'on' : ''}" data-cp="total">За всё время</button></div></div>
+  const periodLabel = crewPeriod === 'total' ? 'за всё время' : crewPeriod === 'range' ? (crewFrom === crewTo ? monthName(crewFrom) : `${monthName(crewFrom)} — ${monthName(crewTo)}`) : monthName(month);
+  const inp = 'padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
+  el.innerHTML = `<div class="pad row sp" style="padding-bottom:0;align-items:flex-start"><div><h2>Бригады · <span class="mute" style="font-weight:500">${esc(periodLabel)}</span></h2><div class="small mute">Бригаде — её доля с работ (55% или по договорённости); компании — прибыль объектов после материалов, бригады, доли зарплаты прораба и стоимости клиента</div></div>
+      <div class="row" style="gap:8px"><div class="seg"><button class="${crewPeriod === 'month' ? 'on' : ''}" data-cp="month">${esc(monthName(month))}</button><button class="${crewPeriod === 'range' ? 'on' : ''}" data-cp="range">Период</button><button class="${crewPeriod === 'total' ? 'on' : ''}" data-cp="total">За всё время</button></div>
+      ${crewPeriod === 'range' ? `<div class="row" style="gap:6px"><input type="month" data-from value="${crewFrom}" style="${inp}"><span class="mute">—</span><input type="month" data-to value="${crewTo}" style="${inp}"></div>` : ''}</div></div>
     ${rows.length ? `<table style="margin-top:10px"><tr><th>Бригада</th><th class="r">Объектов</th><th class="r">Работ</th><th class="r">Бригаде</th><th class="r">Выплачено</th><th class="r">Компании</th><th class="r">Маржа</th><th class="r">Бригаде / объект</th><th class="r">Компании / объект</th></tr>
-      ${rows.map(c => { const x = c[crewPeriod]; return `<tr class="click" data-crew="${c.id ?? 'none'}"><td><b>${esc(c.name)}</b>${!c.is_active ? ' <span class="tag warn">расформирована</span>' : ''}<div class="small mute">${c.foreman_name ? 'прораб ' + esc(c.foreman_name) : (c.id === null ? 'объекты без выбранной бригады' : 'без прораба')}${x.objects_done ? ' · сдано ' + x.objects_done : ''}</div></td>
+      ${rows.map(c => { const x = c[key]; return `<tr class="click" data-crew="${c.id ?? 'none'}"><td><b>${esc(c.name)}</b>${!c.is_active ? ' <span class="tag warn">расформирована</span>' : ''}<div class="small mute">${c.foreman_name ? 'прораб ' + esc(c.foreman_name) : (c.id === null ? 'объекты без выбранной бригады' : 'без прораба')}${x.objects_done ? ' · сдано ' + x.objects_done : ''}</div></td>
           <td class="r num">${x.objects}</td><td class="r num">${fmt(x.works)}</td><td class="r num"><b>${fmt(x.crew)}</b></td><td class="r num">${fmt(x.crew_paid)}${Number(x.crew_due) > 0 ? `<div class="small copper">долг ${fmt(x.crew_due)}</div>` : ''}</td>
           <td class="r num ${sign(x.profit)}"><b>${fmt(x.profit)}</b></td><td class="r num ${sign(x.profit)}">${x.margin !== null ? num(x.margin) + '%' : '—'}</td><td class="r num">${x.crew_per_object ? fmt(x.crew_per_object) : '—'}</td><td class="r num ${sign(x.profit_per_object)}">${x.profit_per_object ? fmt(x.profit_per_object) : '—'}</td></tr>
         <tr class="hidden sub" data-sub="${c.id ?? 'none'}"><td colspan="9" style="padding:0 10px 10px 28px;background:var(--bg)">
           ${x.items.length ? `<table><tr><th>Объект</th><th>Этап</th><th class="r">Работ</th><th class="r">Бригаде</th><th class="r">Материалы</th><th class="r">Компании</th><th class="r">Маржа</th></tr>
-          ${x.items.map(o => `<tr class="click" data-obj="${o.id}"><td>${esc(o.client_name)}<div class="small mute">${esc(o.address || '')}${o.foreman_name ? ' · ' + esc(o.foreman_name) : ''}</div></td><td>${esc(D.object_stage_names[o.stage] || o.stage)}</td><td class="r num">${fmt(o.works)}</td><td class="r num">${fmt(o.crew)}${Number(o.crew_paid) < Number(o.crew) ? `<div class="small mute">выпл. ${fmt(o.crew_paid)}</div>` : ''}</td><td class="r num">${fmt(o.materials)}</td><td class="r num ${sign(o.profit)}">${fmt(o.profit)}</td><td class="r num ${sign(o.profit)}">${o.margin !== null ? num(o.margin) + '%' : '—'}</td></tr>`).join('')}</table>` : '<div class="small mute" style="padding:8px 0">Объектов нет</div>'}</td></tr>`; }).join('')}
+          ${x.items.map(o => `<tr class="click" data-obj="${o.id}"><td>${esc(o.client_name)}<div class="small mute">${esc(o.address || '')}${o.foreman_name ? ' · ' + esc(o.foreman_name) : ''}${o.start_date ? ' · ' + dateRu(o.start_date) : ''}</div></td><td>${esc(D.object_stage_names[o.stage] || o.stage)}</td><td class="r num">${fmt(o.works)}</td><td class="r num">${fmt(o.crew)}${Number(o.crew_paid) < Number(o.crew) ? `<div class="small mute">выпл. ${fmt(o.crew_paid)}</div>` : ''}</td><td class="r num">${fmt(o.materials)}</td><td class="r num ${sign(o.profit)}">${fmt(o.profit)}</td><td class="r num ${sign(o.profit)}">${o.margin !== null ? num(o.margin) + '%' : '—'}</td></tr>`).join('')}</table>` : '<div class="small mute" style="padding:8px 0">Объектов нет</div>'}</td></tr>`; }).join('')}
       <tr style="font-weight:700"><td>Итого</td><td class="r num">${T.objects}</td><td class="r num">${fmt(T.works)}</td><td class="r num">${fmt(T.crew)}</td><td class="r num">${fmt(T.crew_paid)}</td><td class="r num ${sign(T.profit)}">${fmt(T.profit)}</td><td class="r num">${T.revenue ? num(T.profit / T.revenue * 100) + '%' : '—'}</td><td class="r num">${T.objects ? fmt(T.crew / T.objects) : '—'}</td><td class="r num">${T.objects ? fmt(T.profit / T.objects) : '—'}</td></tr></table>
       <div class="pad small mute">Объект относится к месяцу договора. Прибыль по объектам в работе — предварительная: материалы ещё списываются, доп. работы добавляются. Нажмите на бригаду — раскроются её объекты.</div>`
-    : `<div class="pad mute">${crewPeriod === 'month' ? 'В этом месяце договоров с бригадами не было.' : 'Бригад с объектами пока нет.'}</div>`}`;
-  el.querySelectorAll('[data-cp]').forEach(b => b.onclick = () => { crewPeriod = b.dataset.cp; crewsBlock(el, cr, month, D); });
+    : `<div class="pad mute">${crewPeriod === 'total' ? 'Бригад с объектами пока нет.' : 'За этот период договоров с бригадами не было.'}</div>`}`;
+  el.querySelectorAll('[data-cp]').forEach(b => b.onclick = () => { crewPeriod = b.dataset.cp; crewsBlock(el, base, month, D); });
+  el.querySelector('[data-from]')?.addEventListener('change', (e) => { crewFrom = e.target.value || month; crewsBlock(el, base, month, D); });
+  el.querySelector('[data-to]')?.addEventListener('change', (e) => { crewTo = e.target.value || month; crewsBlock(el, base, month, D); });
   el.querySelectorAll('tr[data-crew]').forEach(tr => tr.onclick = () => el.querySelector(`tr[data-sub="${tr.dataset.crew}"]`).classList.toggle('hidden'));
   el.querySelectorAll('tr[data-obj]').forEach(tr => tr.onclick = (e) => { e.stopPropagation(); location.hash = '#/objects/' + tr.dataset.obj; });
 }
