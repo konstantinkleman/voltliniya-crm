@@ -3,6 +3,10 @@ import os, sys, json
 from fastapi.testclient import TestClient
 import app.main as main
 
+
+import datetime as _dt
+M = _dt.date.today().strftime('%Y-%m')   # все даты теста — в текущем месяце (месяц сделки = сегодня)
+
 c = TestClient(main.app)
 with c:
     def post(url, **kw):
@@ -21,9 +25,9 @@ with c:
     assert crew["foreman_name"] == "Андрей К." and len(crew["history"]) == 1
 
     # расходы: зарплата, директ, сервер
-    post("/api/expenses", json={"date": "2026-10-05", "amount": 150000, "category": "salary", "foreman_id": f["id"]})
-    post("/api/expenses", json={"date": "2026-10-03", "amount": 20000, "category": "direct"})
-    post("/api/expenses", json={"date": "2026-10-01", "amount": 3361, "category": "hosting"})
+    post("/api/expenses", json={"date": f"{M}-05", "amount": 150000, "category": "salary", "foreman_id": f["id"]})
+    post("/api/expenses", json={"date": f"{M}-03", "amount": 20000, "category": "direct"})
+    post("/api/expenses", json={"date": f"{M}-01", "amount": 3361, "category": "hosting"})
 
     # заявки
     l1 = post("/api/leads", json={"name": "Марина, ЖК Прокшино", "source": "profi", "lead_cost": 620, "area_m2": 58, "project_kind": "designer"})
@@ -37,7 +41,7 @@ with c:
     # документ к заявке
     doc = post("/api/documents", data={"lead_id": l1["id"], "kind": "offer", "title": "КП Стандарт"}, files={"file": ("kp.pdf", b"%PDF-1.4 test", "application/pdf")})
     r = c.post(f"/api/leads/{l1['id']}/stage", json={"stage": "won"}); assert r.status_code == 400
-    obj = post(f"/api/leads/{l1['id']}/convert", json={"works_sum": 120000, "materials_client_sum": 96000, "tariff": "Стандарт", "foreman_id": f["id"], "start_date": "2026-10-10"})
+    obj = post(f"/api/leads/{l1['id']}/convert", json={"works_sum": 120000, "materials_client_sum": 96000, "tariff": "Стандарт", "foreman_id": f["id"], "start_date": f"{M}-10"})
     assert obj["crew_name"] == "Бригада № 1", obj
     lead = get(f"/api/leads/{l1['id']}"); assert lead["stage"] == "won" and lead["object_id"] == obj["id"] and lead["documents"] == [] or True
     od = get(f"/api/objects/{obj['id']}")
@@ -46,11 +50,11 @@ with c:
     r = c.get(f"/api/documents/{doc['id']}/file"); assert r.status_code == 200 and r.content.startswith(b"%PDF")
 
     # деньги
-    post(f"/api/objects/{obj['id']}/payments", json={"number": 1, "amount": 96000, "date": "2026-10-10"})
-    post(f"/api/objects/{obj['id']}/materials", json={"name": "ВВГнг-LS 3×2,5", "qty": 210, "unit": "м", "cost_sum": 18480, "date": "2026-10-11"})
-    post(f"/api/objects/{obj['id']}/materials", json={"name": "прочее", "cost_sum": 52000, "date": "2026-10-12"})
+    post(f"/api/objects/{obj['id']}/payments", json={"number": 1, "amount": 96000, "date": f"{M}-10"})
+    post(f"/api/objects/{obj['id']}/materials", json={"name": "ВВГнг-LS 3×2,5", "qty": 210, "unit": "м", "cost_sum": 18480, "date": f"{M}-11"})
+    post(f"/api/objects/{obj['id']}/materials", json={"name": "прочее", "cost_sum": 52000, "date": f"{M}-12"})
     post(f"/api/objects/{obj['id']}/extra-works", json={"title": "Доп. линия на кондиционер", "amount": 6000})
-    post(f"/api/objects/{obj['id']}/payouts", json={"amount": 40000, "date": "2026-10-15"})
+    post(f"/api/objects/{obj['id']}/payouts", json={"amount": 40000, "date": f"{M}-15"})
     post(f"/api/objects/{obj['id']}/stage", json={"stage": "install"})
     od = get(f"/api/objects/{obj['id']}")
     fin = od["finance"]
@@ -81,17 +85,20 @@ with c:
     od = get(f"/api/objects/{obj['id']}"); assert od["foreman_name"] == "Новый прораб"
 
     # статистика
-    ch = get("/api/stats/channels?month=2026-10"); print("каналы:", json.dumps(ch, ensure_ascii=False)[:300])
+    ch = get(f"/api/stats/channels?month={M}"); print("каналы:", json.dumps(ch, ensure_ascii=False)[:300])
     assert any(x["source"] == "profi" and x["won"] == 1 for x in ch)
     assert any(x["source"] == "site_direct" and x["lost"] == 1 and float(x["spent"]) == 20000 for x in ch)
-    fs = get("/api/stats/foremen?month=2026-10"); print("прорабы:", [(x["name"], x["objects_in_month"], x["salary_per_object"], x["crew_due"]) for x in fs])
-    sm = get("/api/stats/summary?month=2026-10"); print("сводка:", sm)
+    fs = get(f"/api/stats/foremen?month={M}"); print("прорабы:", [(x["name"], x["objects_in_month"], x["salary_per_object"], x["crew_due"]) for x in fs])
+    cs = get(f"/api/stats/crews?month={M}"); b1 = [x for x in cs if x["name"] == "Бригада № 1"][0]
+    assert b1["month"]["objects"] == 1 and float(b1["month"]["crew"]) == float(od["finance"]["crew_plan"]) and float(b1["month"]["profit"]) == float(od["finance"]["profit"]), b1["month"]
+    assert b1["month"]["items"][0]["client_name"] == od["client_name"] and b1["total"]["objects"] >= 1
+    sm = get(f"/api/stats/summary?month={M}"); print("сводка:", sm)
     assert float(sm["received"]) == 96000 and float(sm["crew_payouts"]) == 40000
 print("SMOKE OK")
 # после переназначения доля зарплаты остаётся за Андреем
 with c:
     od = c.get(f"/api/objects/{obj['id']}").json(); assert od["foreman_name"] == "Новый прораб" and float(od["finance"]["foreman_share"]) == 150000
-    fs = c.get("/api/stats/foremen?month=2026-10").json(); a = [x for x in fs if x["name"] == "Андрей К."][0]; assert a["objects_in_month"] == 1, fs
+    fs = c.get(f"/api/stats/foremen?month={M}").json(); a = [x for x in fs if x["name"] == "Андрей К."][0]; assert a["objects_in_month"] == 1, fs
 print("REASSIGN OK")
 # сумма бригаде по договорённости
 with c:
@@ -111,9 +118,9 @@ with c:
     p2 = post("/api/stock/products", json={"name": "Подрозетник d68", "unit": "шт"})
     assert p1["category_path"] == "Кабель → ВВГнг-LS"
     # приход двумя партиями по разной цене → средняя
-    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-10", "supplier": "Кабель-Центр", "doc_number": "123",
+    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": f"{M}-10", "supplier": "Кабель-Центр", "doc_number": "123",
         "lines": [{"product_id": p1["id"], "qty": 500, "unit_cost": 86}, {"product_id": p2["id"], "qty": 200, "unit_cost": 9}], "add_expense": True})
-    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-11",
+    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": f"{M}-11",
         "lines": [{"product_id": p1["id"], "qty": 100, "unit_cost": 92}, {"new_product": {"name": "Гофра d20", "unit": "м"}, "qty": 200, "unit_cost": 9.5, "client_price": 15}]})
     prods = get(f"/api/stock/products?warehouse_id={wh['id']}")
     g = [x for x in prods if x["name"] == "Гофра d20"][0]; assert float(g["price"]) == 15 and float(g["client_price"]) == 15, g  # цена клиенту из прихода
@@ -124,11 +131,11 @@ with c:
     assert [x for x in prods if x["id"] == p2["id"]][0]["price"] is None
     assert any(x["name"] == "Гофра d20" for x in prods)
     # расход закупки записался
-    ex = get("/api/expenses?month=2026-10"); assert any(e["category"] == "materials" and float(e["amount"]) == 500*86+200*9 for e in ex), ex
+    ex = get(f"/api/expenses?month={M}"); assert any(e["category"] == "materials" and float(e["amount"]) == 500*86+200*9 for e in ex), ex
     # списание на объект → материалы объекта по средней
     before = get(f"/api/objects/{obj['id']}")["finance"]["materials_cost"]
     r = c.post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 1000, "object_id": obj["id"]}); assert r.status_code == 400
-    post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 210, "object_id": obj["id"], "date": "2026-10-12"})
+    post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 210, "object_id": obj["id"], "date": f"{M}-12"})
     od = get(f"/api/objects/{obj['id']}")
     assert float(od["finance"]["materials_cost"]) == float(before) + 210 * 87, od["finance"]["materials_cost"]
     assert any(ml["name"] == "ВВГнг-LS 3×2,5" and float(ml["cost_sum"]) == 210 * 87 for ml in od["materials"])
@@ -155,7 +162,7 @@ with c:
     mine = c3.get("/api/stock/warehouses").json(); assert len(mine) == 1 and mine[0]["id"] == wh["id"]
     assert c3.get(f"/api/stock/products?warehouse_id={wh2['id']}").status_code == 403
     r = c3.post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p2["id"], "qty": 66, "object_id": obj["id"]}); assert r.status_code == 200, r.text
-    assert c3.post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": "2026-10-12", "lines": []}).status_code == 403
+    assert c3.post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": f"{M}-12", "lines": []}).status_code == 403
     # списание нескольких позиций одним документом; категория в материалах объекта
     g = [x for x in get(f"/api/stock/products?warehouse_id={wh['id']}") if x["name"] == "Гофра d20"][0]
     r = post("/api/stock/issue", json={"warehouse_id": wh["id"], "object_id": obj["id"], "lines": [{"product_id": p1["id"], "qty": 5}, {"product_id": g["id"], "qty": 20}]})

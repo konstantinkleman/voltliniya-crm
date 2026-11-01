@@ -83,6 +83,56 @@ def foremen(month: str | None = None, _: m.User = Depends(director), db: Session
     return out
 
 
+def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
+    """Финансовый итог по набору объектов: что заработала бригада и что осталось компании."""
+    fins = [(o, compute(db, o)) for o in objs]
+    z = Decimal(0)
+    works = sum((f.works_base for _, f in fins), z)
+    total = sum((f.contract_total for _, f in fins), z)
+    crew = sum((f.crew_plan for _, f in fins), z)
+    paid = sum((f.crew_paid for _, f in fins), z)
+    mats = sum((f.materials_cost or 0 for _, f in fins), z)
+    fshare = sum((f.foreman_share or 0 for _, f in fins), z)
+    ccost = sum((f.client_cost or 0 for _, f in fins), z)
+    profit = sum((f.profit or 0 for _, f in fins), z)
+    n = len(fins)
+    done = [o for o, _ in fins if o.stage in ("act", "warranty")]
+    return {
+        "objects": n, "objects_done": len(done),
+        "works": q(works), "revenue": q(total),
+        "crew": q(crew), "crew_paid": q(paid), "crew_due": q(crew - paid),
+        "materials": q(mats), "foreman_share": q(fshare), "client_cost": q(ccost),
+        "profit": q(profit), "margin": q(profit / total * 100) if total else None,
+        "crew_per_object": q(crew / n) if n else None, "profit_per_object": q(profit / n) if n else None,
+        "avg_check": q(total / n) if n else None,
+        "items": [{"id": o.id, "client_name": o.client_name, "address": o.address, "stage": o.stage, "foreman_name": o.foreman.name if o.foreman else None,
+                   "works": f.works_base, "revenue": f.contract_total, "crew": f.crew_plan, "crew_paid": f.crew_paid,
+                   "materials": f.materials_cost, "profit": f.profit, "margin": f.margin, "start_date": o.start_date}
+                  for o, f in sorted(fins, key=lambda x: (x[0].start_date or date.min), reverse=True)],
+    }
+
+
+@router.get("/crews")
+def crews_stats(month: str | None = None, _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Сколько заработала каждая бригада (её доля) и сколько осталось компании с её объектов — за месяц сделки и за всё время."""
+    (y, mo), start, end = _bounds(month)
+    crews = db.scalars(select(m.Crew).order_by(m.Crew.id)).all()
+    objs = db.scalars(select(m.WorkObject)).all()
+    leads = {l.object_id: l for l in db.scalars(select(m.Lead).where(m.Lead.object_id.is_not(None))).all()}
+    in_month = {o.id for o in objs if deal_month(o, leads.get(o.id)) == (y, mo)}
+    out = []
+    groups = [(c.id, c.name, c.foreman.name if c.foreman else None, c.is_active) for c in crews]
+    if any(o.crew_id is None for o in objs):
+        groups.append((None, "Без бригады", None, True))
+    for cid, name, foreman, active in groups:
+        mine = [o for o in objs if o.crew_id == cid]
+        if not mine and not active:
+            continue
+        out.append({"id": cid, "name": name, "foreman_name": foreman, "is_active": active,
+                    "month": _agg(db, [o for o in mine if o.id in in_month]), "total": _agg(db, mine)})
+    return out
+
+
 @router.get("/summary")
 def summary(month: str | None = None, _: m.User = Depends(director), db: Session = Depends(get_db)):
     (y, mo), start, end = _bounds(month)
