@@ -85,6 +85,17 @@ echo "APP_VERSION=$(git rev-parse --short HEAD 2>/dev/null || date +%s)" >> .env
 docker compose up -d --build
 sleep 5
 docker compose ps
+
+# 4. Уборка: кэш сборки и старые образы копятся на десятки гигабайт (на 80 ГБ диске за месяц ушло 45 ГБ),
+#    системный журнал — ещё несколько. Чистим после каждого деплоя, работающие контейнеры не трогаем.
+docker builder prune -af >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
+if [ ! -f /etc/systemd/journald.conf.d/size.conf ]; then
+  mkdir -p /etc/systemd/journald.conf.d
+  printf '[Journal]\nSystemMaxUse=300M\n' > /etc/systemd/journald.conf.d/size.conf
+  systemctl restart systemd-journald 2>/dev/null || true
+fi
+echo "Диск: $(df -h / | awk 'NR==2{print $3" занято, "$4" свободно"}')"
 echo
 echo "Проверка API:"; curl -s http://127.0.0.1/api/health || curl -sk https://127.0.0.1/api/health || true; echo
 echo "Готово. Сертификат Let's Encrypt выпустится автоматически, когда DNS $DOMAIN укажет на этот сервер."
