@@ -141,6 +141,13 @@ def crews_stats(month: str | None = None, date_from: str | None = None, date_to:
     crews = db.scalars(select(m.Crew).order_by(m.Crew.id)).all()
     objs = db.scalars(select(m.WorkObject)).all()
     cm = {o.id: closed_month(o) for o in objs}
+    # расходы компании на бригаду (форма, инструмент…) — по дате расхода; из выплат бригаде не вычитаются, это расходы компании
+    exps = db.scalars(select(m.Expense).where(m.Expense.crew_id.is_not(None)).order_by(m.Expense.date.desc())).all()
+    def exp_block(cid, period: bool):
+        items = [e for e in exps if e.crew_id == cid and (not period or lo <= (e.date.year, e.date.month) <= hi)]
+        return {"sum": q(sum((e.amount for e in items), Decimal(0))),
+                "items": [{"id": e.id, "date": e.date, "category": e.category, "category_name": m.EXPENSE_CATEGORIES.get(e.category, (e.category,))[0],
+                           "amount": e.amount, "note": e.note} for e in items]}
     out = []
     groups = [(c.id, c.name, c.foreman.name if c.foreman else None, c.is_active) for c in crews]
     if any(o.crew_id is None for o in objs):
@@ -155,7 +162,9 @@ def crews_stats(month: str | None = None, date_from: str | None = None, date_to:
         out.append({"id": cid, "name": name, "foreman_name": foreman, "is_active": active,
                     "done": _agg(db, done_period),      # сдано за период
                     "done_total": _agg(db, done_all),   # сдано за всё время
-                    "active": _agg(db, active_objs)})   # в работе сейчас
+                    "active": _agg(db, active_objs),    # в работе сейчас
+                    "expenses": exp_block(cid, True),   # расходы на бригаду за период
+                    "expenses_total": exp_block(cid, False)})
     return out
 
 

@@ -8,27 +8,33 @@ const TYPE_NAMES = { channel: 'маркетинг по каналу', marketing:
 export async function render(main, r, state) {
   S = state; D = state.dicts;
   const month = r.q.get('month') || monthKey();
-  const [list, foremen] = await Promise.all([api.get('/api/expenses?month=' + month), api.get('/api/foremen')]);
+  const crewF = r.q.get('crew') || '';
+  const [all, foremen, crews] = await Promise.all([api.get('/api/expenses?month=' + month), api.get('/api/foremen'), api.get('/api/crews')]);
+  const list = crewF ? all.filter(e => String(e.crew_id) === crewF) : all;
+  const crewSum = all.filter(e => e.crew_id).reduce((a, e) => a + Number(e.amount), 0);
   const cats = D.expense_categories;
   const sum = (t) => list.filter(e => (cats[e.category] || {}).type === t).reduce((a, e) => a + Number(e.amount), 0);
   const total = list.reduce((a, e) => a + Number(e.amount), 0);
-  main.innerHTML = `<div class="head"><div><h1>Расходы</h1><p>${monthName(month)}: ${fmt(total)} · маркетинг ${fmt(sum('channel') + sum('marketing'))} · персонал ${fmt(sum('staff'))} · операционные ${fmt(sum('operating'))}</p></div>
-    <div class="row">${monthPicker(month)}<button class="btn p" data-new>Добавить расход</button></div></div>
+  main.innerHTML = `<div class="head"><div><h1>Расходы</h1><p>${monthName(month)}: ${fmt(total)} · маркетинг ${fmt(sum('channel') + sum('marketing'))} · персонал ${fmt(sum('staff'))} · операционные ${fmt(sum('operating'))}${crewSum ? ` · на бригады ${fmt(crewSum)}` : ''}</p></div>
+    <div class="row">${monthPicker(month)}<select data-crewf class="btn" style="padding:7px 10px"><option value="">Все расходы</option>${crews.map(c => `<option value="${c.id}" ${String(c.id) === crewF ? 'selected' : ''}>На бригаду: ${esc(c.name)}</option>`).join('')}</select><button class="btn p" data-new>Добавить расход</button></div></div>
     ${list.length ? `<div class="card wrap"><table><tr><th>Дата</th><th>Категория</th><th>Тип</th><th>Комментарий</th><th class="r">Сумма</th><th></th></tr>
-      ${list.map(e => { const c = cats[e.category] || { name: e.category, type: 'operating' }; return `<tr><td class="num">${dateRu(e.date)}</td><td><b>${esc(c.name)}</b>${e.foreman_name ? `<div class="small mute">${esc(e.foreman_name)}${e.period ? ' · за ' + monthName(e.period) : ''}</div>` : ''}</td>
+      ${list.map(e => { const c = cats[e.category] || { name: e.category, type: 'operating' }; return `<tr><td class="num">${dateRu(e.date)}</td><td><b>${esc(c.name)}</b>${e.foreman_name ? `<div class="small mute">${esc(e.foreman_name)}${e.period ? ' · за ' + monthName(e.period) : ''}</div>` : ''}${e.crew_name ? `<div class="small"><span class="tag">бригада · ${esc(e.crew_name)}</span></div>` : ''}</td>
         <td>${e.channel ? `<span class="src ${srcClass(e.channel)}">${esc(D.sources[e.channel] || e.channel)}</span>` : `<span class="small mute">${TYPE_NAMES[c.type]}</span>`}</td><td class="mute">${esc(e.note || '')}</td><td class="r num">${fmt(e.amount)}</td><td class="r"><button class="btn s" data-del="${e.id}">×</button></td></tr>`; }).join('')}</table></div>`
     : emptyState('За этот месяц расходов нет', 'Вносите все расходы, не только рекламу — иначе прибыль за месяц будет неполной. Зарплата прораба вносится из раздела «Прорабы».')}`;
-  main.querySelector('[data-month]').onchange = (e) => location.hash = '#/expenses?month=' + e.target.value;
-  main.querySelector('[data-new]').onclick = () => newExpense(() => render(main, r, S), foremen);
+  main.querySelector('[data-month]').onchange = (e) => location.hash = '#/expenses?month=' + e.target.value + (crewF ? '&crew=' + crewF : '');
+  main.querySelector('[data-crewf]').onchange = (e) => location.hash = '#/expenses?month=' + month + (e.target.value ? '&crew=' + e.target.value : '');
+  main.querySelector('[data-new]').onclick = () => newExpense(() => render(main, r, S), foremen, crews);
   main.querySelectorAll('[data-del]').forEach(b => b.onclick = () => confirmModal('Удалить расход?', async () => { await api.del('/api/expenses/' + b.dataset.del); render(main, r, S); }, 'Удалить'));
 }
 
-export function newExpense(onDone, foremen) {
+export function newExpense(onDone, foremen, crews = []) {
   const cats = D.expense_categories;
   const groups = ['channel', 'marketing', 'staff', 'operating'];
   const options = groups.flatMap(t => Object.entries(cats).filter(([, c]) => c.type === t).map(([k, c]) => ({ value: k, label: `${c.name} — ${TYPE_NAMES[t]}` })));
   formModal({ title: 'Новый расход', submit: 'Сохранить',
     fields: [{ name: 'amount', label: 'Сумма, ₽', type: 'number', required: true, inputmode: 'decimal' }, { name: 'category', label: 'Категория', type: 'select', options, value: 'direct' }, { name: 'date', label: 'Дата', type: 'date', value: today() },
-      { name: 'foreman_id', label: 'Прораб (для зарплаты)', type: 'select', options: [{ value: '', label: '—' }, ...foremen.map(f => ({ value: f.id, label: f.name }))] }, { name: 'method', label: 'Способ', type: 'select', options: [{ value: '', label: '—' }, ...opt(D.pay_methods)] }, { name: 'note', label: 'Комментарий' }],
-    onSubmit: async (v) => { v.foreman_id = v.foreman_id ? Number(v.foreman_id) : null; await api.post('/api/expenses', v); toast('Расход сохранён'); onDone(); } });
+      { name: 'foreman_id', label: 'Прораб (для зарплаты)', type: 'select', options: [{ value: '', label: '—' }, ...foremen.map(f => ({ value: f.id, label: f.name }))] },
+      { name: 'crew_id', label: 'На бригаду (форма, инструмент — расход компании, из выплат бригаде не вычитается)', type: 'select', options: [{ value: '', label: '— не на бригаду —' }, ...crews.filter(c => c.is_active).map(c => ({ value: c.id, label: c.name + (c.foreman_name ? ' · ' + c.foreman_name : '') }))] },
+      { name: 'method', label: 'Способ', type: 'select', options: [{ value: '', label: '—' }, ...opt(D.pay_methods)] }, { name: 'note', label: 'Комментарий', placeholder: 'например: форма, 6 комплектов' }],
+    onSubmit: async (v) => { v.foreman_id = v.foreman_id ? Number(v.foreman_id) : null; v.crew_id = v.crew_id ? Number(v.crew_id) : null; await api.post('/api/expenses', v); toast('Расход сохранён'); onDone(); } });
 }

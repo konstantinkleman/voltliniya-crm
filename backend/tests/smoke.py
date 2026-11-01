@@ -103,6 +103,14 @@ with c:
     c.patch(f"/api/objects/{obj['id']}", json={"end_date": f"{y-1}-06-15"})
     assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={y-1}-12") if x["name"] == "Бригада № 1"][0]["done"]["objects"] == 1
     c.patch(f"/api/objects/{obj['id']}", json={"end_date": None}); post(f"/api/objects/{obj['id']}/stage", json={"stage": "install"})
+    # расходы компании на бригаду: форма и инструмент → видны в статистике бригады, из её денег не вычитаются
+    post("/api/expenses", json={"date": f"{M}-07", "amount": 18000, "category": "gear", "crew_id": crew["id"], "note": "форма, 6 комплектов"})
+    post("/api/expenses", json={"date": f"{M}-08", "amount": 32000, "category": "tools", "crew_id": crew["id"], "note": "перфоратор"})
+    assert c.post("/api/expenses", json={"date": f"{M}-08", "amount": 1, "category": "tools", "crew_id": 9999}).status_code == 400
+    assert len(get(f"/api/expenses?crew_id={crew['id']}")) == 2
+    b1 = [x for x in get(f"/api/stats/crews?month={M}") if x["name"] == "Бригада № 1"][0]
+    assert float(b1["expenses"]["sum"]) == 50000 and len(b1["expenses"]["items"]) == 2 and b1["expenses"]["items"][0]["category_name"] == "Инструмент", b1["expenses"]
+    assert float(b1["active"]["crew"]) == float(od["finance"]["crew_plan"])   # доля бригады не изменилась
     sm = get(f"/api/stats/summary?month={M}"); print("сводка:", sm)
     assert float(sm["received"]) == 96000 and float(sm["crew_payouts"]) == 40000
 print("SMOKE OK")

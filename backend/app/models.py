@@ -59,6 +59,7 @@ EXPENSE_CATEGORIES = {
     "staff_other": ("Персонал прочее", "staff", None),
     "materials": ("Закупка материалов", "materials", None),
     "tools": ("Инструмент", "operating", None),
+    "gear": ("Экипировка и форма", "operating", None),
     "transport": ("Транспорт", "operating", None),
     "warehouse_rent": ("Аренда склада", "operating", None),
     "accounting": ("Бухгалтерия и банк", "operating", None),
@@ -260,11 +261,13 @@ class Expense(Base, TimestampMixin):
     category: Mapped[str] = mapped_column(String(30), index=True)
     channel: Mapped[str | None] = mapped_column(String(30))     # источник, если расход по каналу
     foreman_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # для зарплаты
+    crew_id: Mapped[int | None] = mapped_column(ForeignKey("crews.id"))     # расход на конкретную бригаду (форма, инструмент)
     period: Mapped[str | None] = mapped_column(String(7))       # YYYY-MM, за какой месяц (зарплата)
     method: Mapped[str | None] = mapped_column(String(20))
     note: Mapped[str | None] = mapped_column(Text)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     foreman: Mapped["User | None"] = relationship(foreign_keys=[foreman_id])
+    crew: Mapped["Crew | None"] = relationship()
 
 
 class Document(Base):

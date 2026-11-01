@@ -339,6 +339,7 @@ class ExpenseIn(BaseModel):
     amount: Decimal
     category: str
     foreman_id: int | None = None
+    crew_id: int | None = None
     period: str | None = None
     method: str | None = None
     note: str | None = None
@@ -348,6 +349,7 @@ class ExpenseOut(ORM, ExpenseIn):
     id: int
     channel: str | None
     foreman_name: str | None = None
+    crew_name: str | None = None
     created_at: datetime
 
 

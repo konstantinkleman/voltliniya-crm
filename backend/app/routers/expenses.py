@@ -15,11 +15,12 @@ router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 def _out(e: m.Expense) -> ExpenseOut:
     o = ExpenseOut.model_validate(e)
     o.foreman_name = e.foreman.name if e.foreman else None
+    o.crew_name = e.crew.name if e.crew else None
     return o
 
 
 @router.get("", response_model=list[ExpenseOut])
-def list_expenses(month: str | None = None, category: str | None = None,
+def list_expenses(month: str | None = None, category: str | None = None, crew_id: int | None = None,
                   _: m.User = Depends(director), db: Session = Depends(get_db)):
     qs = select(m.Expense).order_by(m.Expense.date.desc(), m.Expense.id.desc())
     if month:
@@ -29,6 +30,8 @@ def list_expenses(month: str | None = None, category: str | None = None,
         qs = qs.where(m.Expense.date >= start, m.Expense.date < end)
     if category:
         qs = qs.where(m.Expense.category == category)
+    if crew_id:
+        qs = qs.where(m.Expense.crew_id == crew_id)
     return [_out(e) for e in db.scalars(qs).all()]
 
 
@@ -39,6 +42,8 @@ def create_expense(data: ExpenseIn, user: m.User = Depends(director), db: Sessio
         raise HTTPException(400, "Неизвестная категория")
     if data.category == "salary" and not data.foreman_id:
         raise HTTPException(400, "Для зарплаты укажите прораба")
+    if data.crew_id and not db.get(m.Crew, data.crew_id):
+        raise HTTPException(400, "Бригада не найдена")
     e = m.Expense(**data.model_dump(), channel=cat[2], user_id=user.id)
     if e.category == "salary" and not e.period:
         e.period = e.date.strftime("%Y-%m")

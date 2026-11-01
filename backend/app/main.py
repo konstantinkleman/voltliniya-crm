@@ -54,6 +54,7 @@ def migrate():
     wanted = {
         "objects": [("crew_sum_override", "NUMERIC(14,2)"), ("salary_foreman_id", "INTEGER")],
         "material_lines": [("movement_id", "INTEGER")],
+        "expenses": [("crew_id", "INTEGER")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
