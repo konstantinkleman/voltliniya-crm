@@ -83,6 +83,22 @@ def foremen(month: str | None = None, _: m.User = Depends(director), db: Session
     return out
 
 
+DONE_STAGES = ("act", "warranty")
+
+
+def closed_month(o: m.WorkObject) -> tuple[int, int] | None:
+    """Месяц сдачи: дата «Сдача» объекта, иначе — когда этап стал «Акт подписан» по журналу этапов. None — объект ещё в работе."""
+    if o.stage not in DONE_STAGES:
+        return None
+    d = o.end_date
+    if not d:
+        for lg in o.stage_log:
+            if lg.stage in DONE_STAGES:
+                d = lg.created_at.date(); break
+    d = d or date.today()
+    return d.year, d.month
+
+
 def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
     """Финансовый итог по набору объектов: что заработала бригада и что осталось компании."""
     fins = [(o, compute(db, o)) for o in objs]
@@ -96,9 +112,8 @@ def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
     ccost = sum((f.client_cost or 0 for _, f in fins), z)
     profit = sum((f.profit or 0 for _, f in fins), z)
     n = len(fins)
-    done = [o for o, _ in fins if o.stage in ("act", "warranty")]
     return {
-        "objects": n, "objects_done": len(done),
+        "objects": n,
         "works": q(works), "revenue": q(total),
         "crew": q(crew), "crew_paid": q(paid), "crew_due": q(crew - paid),
         "materials": q(mats), "foreman_share": q(fshare), "client_cost": q(ccost),
@@ -107,8 +122,8 @@ def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
         "avg_check": q(total / n) if n else None,
         "items": [{"id": o.id, "client_name": o.client_name, "address": o.address, "stage": o.stage, "foreman_name": o.foreman.name if o.foreman else None,
                    "works": f.works_base, "revenue": f.contract_total, "crew": f.crew_plan, "crew_paid": f.crew_paid,
-                   "materials": f.materials_cost, "profit": f.profit, "margin": f.margin, "start_date": o.start_date}
-                  for o, f in sorted(fins, key=lambda x: (x[0].start_date or date.min), reverse=True)],
+                   "materials": f.materials_cost, "profit": f.profit, "margin": f.margin, "start_date": o.start_date, "end_date": o.end_date}
+                  for o, f in sorted(fins, key=lambda x: (x[0].end_date or x[0].start_date or date.min), reverse=True)],
     }
 
 
@@ -116,7 +131,8 @@ def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
 def crews_stats(month: str | None = None, date_from: str | None = None, date_to: str | None = None,
                 _: m.User = Depends(director), db: Session = Depends(get_db)):
     """Сколько заработала каждая бригада (её доля) и сколько осталось компании с её объектов.
-    Период — по месяцу договора: month=YYYY-MM (один месяц) или date_from/date_to=YYYY-MM (диапазон включительно); плюс всегда «за всё время»."""
+    Сданные объекты относятся к месяцу сдачи (акт подписан): month=YYYY-MM или date_from/date_to=YYYY-MM (включительно).
+    Объекты в работе показываются отдельно — у них месяца ещё нет, период на них не влияет. total — за всё время."""
     (y, mo), start, end = _bounds(month)
     lo = tuple(map(int, date_from.split("-"))) if date_from else (y, mo)
     hi = tuple(map(int, date_to.split("-"))) if date_to else (lo if date_from else (y, mo))
@@ -124,8 +140,7 @@ def crews_stats(month: str | None = None, date_from: str | None = None, date_to:
         lo, hi = hi, lo
     crews = db.scalars(select(m.Crew).order_by(m.Crew.id)).all()
     objs = db.scalars(select(m.WorkObject)).all()
-    leads = {l.object_id: l for l in db.scalars(select(m.Lead).where(m.Lead.object_id.is_not(None))).all()}
-    in_month = {o.id for o in objs if lo <= deal_month(o, leads.get(o.id)) <= hi}
+    cm = {o.id: closed_month(o) for o in objs}
     out = []
     groups = [(c.id, c.name, c.foreman.name if c.foreman else None, c.is_active) for c in crews]
     if any(o.crew_id is None for o in objs):
@@ -134,8 +149,13 @@ def crews_stats(month: str | None = None, date_from: str | None = None, date_to:
         mine = [o for o in objs if o.crew_id == cid]
         if not mine and not active:
             continue
+        done_period = [o for o in mine if cm[o.id] and lo <= cm[o.id] <= hi]
+        done_all = [o for o in mine if cm[o.id]]
+        active_objs = [o for o in mine if not cm[o.id]]
         out.append({"id": cid, "name": name, "foreman_name": foreman, "is_active": active,
-                    "month": _agg(db, [o for o in mine if o.id in in_month]), "total": _agg(db, mine)})
+                    "done": _agg(db, done_period),      # сдано за период
+                    "done_total": _agg(db, done_all),   # сдано за всё время
+                    "active": _agg(db, active_objs)})   # в работе сейчас
     return out
 
 

@@ -90,12 +90,19 @@ with c:
     assert any(x["source"] == "site_direct" and x["lost"] == 1 and float(x["spent"]) == 20000 for x in ch)
     fs = get(f"/api/stats/foremen?month={M}"); print("прорабы:", [(x["name"], x["objects_in_month"], x["salary_per_object"], x["crew_due"]) for x in fs])
     cs = get(f"/api/stats/crews?month={M}"); b1 = [x for x in cs if x["name"] == "Бригада № 1"][0]
-    assert b1["month"]["objects"] == 1 and float(b1["month"]["crew"]) == float(od["finance"]["crew_plan"]) and float(b1["month"]["profit"]) == float(od["finance"]["profit"]), b1["month"]
-    assert b1["month"]["items"][0]["client_name"] == od["client_name"] and b1["total"]["objects"] >= 1
-    # диапазон месяцев: текущий входит, прошлый год — нет
+    # объект ещё в работе → в «заработано» пусто, в «в работе» — он
+    assert b1["done"]["objects"] == 0 and b1["active"]["objects"] == 1 and float(b1["active"]["crew"]) == float(od["finance"]["crew_plan"]), b1
+    # сдаём объект: дата сдачи ставится сама, объект уходит в «заработано» месяца сдачи
+    odx = post(f"/api/objects/{obj['id']}/stage", json={"stage": "act"}); assert odx["end_date"] == _dt.date.today().isoformat()
+    b1 = [x for x in get(f"/api/stats/crews?month={M}") if x["name"] == "Бригада № 1"][0]
+    assert b1["done"]["objects"] == 1 and b1["active"]["objects"] == 0 and float(b1["done"]["profit"]) == float(od["finance"]["profit"]) and b1["done_total"]["objects"] == 1, b1
+    # диапазон месяцев: текущий входит, прошлый год — нет; дата сдачи правится вручную и переносит объект в другой месяц
     y = int(M[:4])
-    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={M}") if x["name"] == "Бригада № 1"][0]["month"]["objects"] == 1
-    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={y-1}-12") if x["name"] == "Бригада № 1"][0]["month"]["objects"] == 0
+    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={M}") if x["name"] == "Бригада № 1"][0]["done"]["objects"] == 1
+    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={y-1}-12") if x["name"] == "Бригада № 1"][0]["done"]["objects"] == 0
+    c.patch(f"/api/objects/{obj['id']}", json={"end_date": f"{y-1}-06-15"})
+    assert [x for x in get(f"/api/stats/crews?date_from={y-1}-01&date_to={y-1}-12") if x["name"] == "Бригада № 1"][0]["done"]["objects"] == 1
+    c.patch(f"/api/objects/{obj['id']}", json={"end_date": None}); post(f"/api/objects/{obj['id']}/stage", json={"stage": "install"})
     sm = get(f"/api/stats/summary?month={M}"); print("сводка:", sm)
     assert float(sm["received"]) == 96000 and float(sm["crew_payouts"]) == 40000
 print("SMOKE OK")

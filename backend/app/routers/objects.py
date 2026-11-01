@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -116,6 +117,9 @@ def set_stage(oid: int, data: ObjectStage, user: m.User = Depends(current_user),
     if data.stage not in m.OBJECT_STAGES:
         raise HTTPException(400, "Неизвестный этап")
     o.stage = data.stage
+    # дата сдачи: ставится при подписании акта (если не задана вручную) — по ней объект относится к месяцу в статистике бригад
+    if data.stage in ("act", "warranty") and not o.end_date:
+        o.end_date = date.today()
     db.add(m.ObjectStageLog(object_id=o.id, stage=data.stage, user_id=user.id))
     db.commit()
     db.refresh(o)
