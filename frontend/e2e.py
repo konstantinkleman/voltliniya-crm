@@ -74,7 +74,12 @@ async def main():
         # платёж, материалы, выплата, этап
         await pg.click("[data-pay]"); await fill_modal({"number": 1, "amount": 96000})
         await pg.click("[data-mat]"); await fill_modal({"name": "ВВГнг-LS 3×2,5", "qty": 210, "unit": "м", "cost_sum": 18480})
-        await pg.click("[data-payout]"); await fill_modal({"amount": 40000})
+        # доп. работа с копейками → доля бригады 55% становится дробной (66 412,50); формы суммы и выплаты должны принимать такое значение
+        await pg.click("[data-extra]"); await fill_modal({"title": "Розетка доп.", "amount": 750})
+        await pg.click("[data-payout]"); await pg.wait_for_selector(".modal.open form"); v = await pg.locator(".modal.open [name=amount]").input_value(); assert v.endswith(".5"), v
+        await pg.fill(".modal.open [name=amount]", "40000"); await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached", timeout=5000)
+        await pg.click("[data-crewsum]"); await pg.wait_for_selector(".modal.open form"); await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached", timeout=5000)   # сохранить подставленное дробное значение
+        await pg.wait_for_timeout(600); t = await pg.locator(".ladder").inner_text(); assert "по договорённости" in t, t
         await pg.click("[data-next]"); await pg.wait_for_timeout(600)
         await pg.click("[data-next]"); await pg.wait_for_timeout(600)
         await shot("07-object-money")
