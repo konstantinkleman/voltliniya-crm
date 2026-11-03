@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .models import EXPENSE_CATEGORIES, Expense, Lead, User, WorkObject
-from .schemas import Finance
+from .schemas import CrewShare, Finance
 
 Q = Decimal("0.01")
 
@@ -87,6 +87,38 @@ def foreman_share(db: Session, o: WorkObject, lead: Lead | None) -> tuple[Decima
     return q(foreman.salary / n), n
 
 
+def crew_split(o: WorkObject, crew_plan: Decimal) -> tuple[list[dict], Decimal]:
+    """Делит сумму бригаде объекта между монтажниками. Фиксированные доли — как заданы,
+    остаток — поровну между остальными (копейки — последнему). Выплаты — по crew_id.
+    Возвращает ([{link_id, crew_id, crew_name, plan, fixed, paid, due}], не распределено)."""
+    links = list(o.crew_links)
+    paid_by = {}
+    for p in o.payouts:
+        paid_by[p.crew_id] = paid_by.get(p.crew_id, Decimal(0)) + p.amount
+    if not links:
+        # монтажник не назначен: всё на объект целиком
+        return [], q(crew_plan)
+    fixed_sum = sum((l.amount for l in links if l.amount is not None), Decimal(0))
+    free = [l for l in links if l.amount is None]
+    rest = crew_plan - fixed_sum
+    each = q(rest / len(free)) if free and rest > 0 else Decimal(0)
+    out = []
+    for l in links:
+        if l.amount is not None:
+            plan = q(l.amount)
+        else:
+            plan = each if l is not free[-1] else q(max(rest, Decimal(0)) - each * (len(free) - 1))
+        paid = q(paid_by.get(l.crew_id, Decimal(0)))
+        out.append({"link_id": l.id, "crew_id": l.crew_id, "crew_name": l.crew.name if l.crew else "—",
+                    "plan": plan, "fixed": l.amount is not None, "paid": paid, "due": q(plan - paid)})
+    unassigned = q(crew_plan - sum((x["plan"] for x in out), Decimal(0)))
+    # выплаты без монтажника (до появления нескольких на объекте) — показываем отдельной строкой
+    stray = q(sum((v for k, v in paid_by.items() if k not in {l.crew_id for l in links}), Decimal(0)))
+    if stray:
+        out.append({"link_id": None, "crew_id": None, "crew_name": "Выплаты без монтажника", "plan": Decimal(0), "fixed": False, "paid": stray, "due": -stray})
+    return out, unassigned
+
+
 def compute(db: Session, o: WorkObject, full: bool = True) -> Finance:
     lead = db.scalar(select(Lead).where(Lead.object_id == o.id))
     share = Decimal(str(settings.CREW_SHARE))
@@ -105,6 +137,9 @@ def compute(db: Session, o: WorkObject, full: bool = True) -> Finance:
         crew_paid=crew_paid, crew_due=q(crew_plan - crew_paid),
         crew_share_actual=(q(crew_paid / works_base) if works_base and crew_paid else None),
     )
+    shares, unassigned = crew_split(o, crew_plan)
+    f.crews = [CrewShare(**x) for x in shares]
+    f.crew_unassigned = unassigned
     if not full:
         return f
     mat_cost = q(sum((m.cost_sum for m in o.materials), Decimal(0)))

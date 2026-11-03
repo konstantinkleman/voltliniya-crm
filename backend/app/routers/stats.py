@@ -99,21 +99,35 @@ def closed_month(o: m.WorkObject) -> tuple[int, int] | None:
     return d.year, d.month
 
 
-def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
-    """Финансовый итог по набору объектов: что заработала бригада и что осталось компании."""
-    fins = [(o, compute(db, o)) for o in objs]
+def _agg(db: Session, objs: list[m.WorkObject], crew_id: int | None = None, cache: dict | None = None) -> dict:
+    """Финансовый итог по набору объектов для одного монтажника (бригады): его доля и что осталось компании.
+    Если на объекте несколько монтажников, деньги объекта (работы, материалы, прибыль) делятся пропорционально
+    их долям — так общий итог по всем не задваивается. crew_id=None — объекты без монтажника, целиком."""
+    cache = cache if cache is not None else {}
+    rows = []
+    for o in objs:
+        f = cache.get(o.id) or cache.setdefault(o.id, compute(db, o))
+        if crew_id is None:
+            share, frac, paid, n_crews = f.crew_plan, Decimal(1), f.crew_paid, 1
+        else:
+            sh = next((x for x in f.crews if x.crew_id == crew_id), None)
+            n_crews = len([x for x in f.crews if x.link_id])
+            share = sh.plan if sh else Decimal(0)
+            paid = sh.paid if sh else Decimal(0)
+            frac = (share / f.crew_plan) if f.crew_plan else (Decimal(1) / n_crews if n_crews else Decimal(1))
+        rows.append((o, f, share, paid, frac, n_crews))
     z = Decimal(0)
-    works = sum((f.works_base for _, f in fins), z)
-    total = sum((f.contract_total for _, f in fins), z)
-    crew = sum((f.crew_plan for _, f in fins), z)
-    paid = sum((f.crew_paid for _, f in fins), z)
-    mats = sum((f.materials_cost or 0 for _, f in fins), z)
-    fshare = sum((f.foreman_share or 0 for _, f in fins), z)
-    ccost = sum((f.client_cost or 0 for _, f in fins), z)
-    profit = sum((f.profit or 0 for _, f in fins), z)
-    n = len(fins)
+    works = sum((f.works_base * fr for _, f, _, _, fr, _ in rows), z)
+    total = sum((f.contract_total * fr for _, f, _, _, fr, _ in rows), z)
+    crew = sum((sh for _, _, sh, _, _, _ in rows), z)
+    paid = sum((pd for _, _, _, pd, _, _ in rows), z)
+    mats = sum(((f.materials_cost or 0) * fr for _, f, _, _, fr, _ in rows), z)
+    fshare = sum(((f.foreman_share or 0) * fr for _, f, _, _, fr, _ in rows), z)
+    ccost = sum(((f.client_cost or 0) * fr for _, f, _, _, fr, _ in rows), z)
+    profit = sum(((f.profit or 0) * fr for _, f, _, _, fr, _ in rows), z)
+    n = len(rows)
     return {
-        "objects": n,
+        "objects": n, "objects_share": q(sum((fr for *_, fr, _ in rows), z)),
         "works": q(works), "revenue": q(total),
         "crew": q(crew), "crew_paid": q(paid), "crew_due": q(crew - paid),
         "materials": q(mats), "foreman_share": q(fshare), "client_cost": q(ccost),
@@ -121,9 +135,10 @@ def _agg(db: Session, objs: list[m.WorkObject]) -> dict:
         "crew_per_object": q(crew / n) if n else None, "profit_per_object": q(profit / n) if n else None,
         "avg_check": q(total / n) if n else None,
         "items": [{"id": o.id, "client_name": o.client_name, "address": o.address, "stage": o.stage, "foreman_name": o.foreman.name if o.foreman else None,
-                   "works": f.works_base, "revenue": f.contract_total, "crew": f.crew_plan, "crew_paid": f.crew_paid,
-                   "materials": f.materials_cost, "profit": f.profit, "margin": f.margin, "start_date": o.start_date, "end_date": o.end_date}
-                  for o, f in sorted(fins, key=lambda x: (x[0].end_date or x[0].start_date or date.min), reverse=True)],
+                   "works": q(f.works_base * fr), "revenue": q(f.contract_total * fr), "crew": q(sh), "crew_paid": q(pd),
+                   "materials": q((f.materials_cost or 0) * fr), "profit": q((f.profit or 0) * fr), "margin": f.margin,
+                   "shared": nc > 1, "share_pct": q(fr * 100), "start_date": o.start_date, "end_date": o.end_date}
+                  for o, f, sh, pd, fr, nc in sorted(rows, key=lambda x: (x[0].end_date or x[0].start_date or date.min), reverse=True)],
     }
 
 
@@ -149,20 +164,22 @@ def crews_stats(month: str | None = None, date_from: str | None = None, date_to:
                 "items": [{"id": e.id, "date": e.date, "category": e.category, "category_name": m.EXPENSE_CATEGORIES.get(e.category, (e.category,))[0],
                            "amount": e.amount, "note": e.note} for e in items]}
     out = []
+    cache = {}
+    members = {o.id: {l.crew_id for l in o.crew_links} for o in objs}
     groups = [(c.id, c.name, c.foreman.name if c.foreman else None, c.is_active) for c in crews]
-    if any(o.crew_id is None for o in objs):
+    if any(not members[o.id] for o in objs):
         groups.append((None, "Без бригады", None, True))
     for cid, name, foreman, active in groups:
-        mine = [o for o in objs if o.crew_id == cid]
+        mine = [o for o in objs if (cid in members[o.id] if cid is not None else not members[o.id])]
         if not mine and not active:
             continue
         done_period = [o for o in mine if cm[o.id] and lo <= cm[o.id] <= hi]
         done_all = [o for o in mine if cm[o.id]]
         active_objs = [o for o in mine if not cm[o.id]]
         out.append({"id": cid, "name": name, "foreman_name": foreman, "is_active": active,
-                    "done": _agg(db, done_period),      # сдано за период
-                    "done_total": _agg(db, done_all),   # сдано за всё время
-                    "active": _agg(db, active_objs),    # в работе сейчас
+                    "done": _agg(db, done_period, cid, cache),      # сдано за период
+                    "done_total": _agg(db, done_all, cid, cache),   # сдано за всё время
+                    "active": _agg(db, active_objs, cid, cache),    # в работе сейчас
                     "expenses": exp_block(cid, True),   # расходы на бригаду за период
                     "expenses_total": exp_block(cid, False)})
     return out

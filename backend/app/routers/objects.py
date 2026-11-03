@@ -21,8 +21,12 @@ def object_out(db: Session, o: m.WorkObject, full: bool, detail: bool = False) -
     cls = ObjectDetail if detail else ObjectOut
     out = cls.model_validate(o)
     out.foreman_name = o.foreman.name if o.foreman else None
-    out.crew_name = o.crew.name if o.crew else None
+    out.crew_name = ", ".join(l.crew.name for l in o.crew_links if l.crew) or (o.crew.name if o.crew else None)
     out.finance = compute(db, o, full=full)
+    if detail:
+        names = {l.crew_id: l.crew.name for l in o.crew_links if l.crew}
+        for p in out.payouts:
+            p.crew_name = names.get(p.crew_id) or (db.get(m.Crew, p.crew_id).name if p.crew_id and db.get(m.Crew, p.crew_id) else None)
     if detail and out.materials:
         # категория позиции для материалов, списанных со склада — чтобы группировать таблицу
         from .stock import _cat_path
@@ -61,6 +65,21 @@ def _crew_for(db: Session, foreman_id: int | None, crew_id: int | None = None) -
     return crews[0].id if len(crews) == 1 else None
 
 
+def sync_primary_crew(db: Session, o: m.WorkObject, crew_id: int | None) -> None:
+    """Основная бригада объекта (выбор при назначении прораба). Если на объекте один монтажник — заменяем его;
+    если несколько — добавляем выбранного, остальных не трогаем."""
+    o.crew_id = crew_id
+    if not crew_id:
+        if len(o.crew_links) <= 1 and not any(p.crew_id for p in o.payouts):
+            o.crew_links.clear()
+        return
+    if any(l.crew_id == crew_id for l in o.crew_links):
+        return
+    if len(o.crew_links) <= 1 and not any(p.crew_id and p.crew_id != crew_id for p in o.payouts):
+        o.crew_links.clear()
+    o.crew_links.append(m.ObjectCrew(crew_id=crew_id))
+
+
 @router.get("", response_model=list[ObjectOut])
 def list_objects(stage: str | None = None, active: bool | None = None,
                  user: m.User = Depends(current_user), db: Session = Depends(get_db)):
@@ -78,9 +97,10 @@ def list_objects(stage: str | None = None, active: bool | None = None,
 
 @router.post("", response_model=ObjectDetail)
 def create_object(data: ObjectCreate, user: m.User = Depends(director), db: Session = Depends(get_db)):
-    o = m.WorkObject(**data.model_dump(exclude={"crew_id"}), crew_id=_crew_for(db, data.foreman_id, data.crew_id), salary_foreman_id=data.foreman_id)
+    o = m.WorkObject(**data.model_dump(exclude={"crew_id"}), salary_foreman_id=data.foreman_id)
     db.add(o)
     db.flush()
+    sync_primary_crew(db, o, _crew_for(db, data.foreman_id, data.crew_id))
     db.add(m.ObjectStageLog(object_id=o.id, stage="contract", user_id=user.id))
     db.commit()
     db.refresh(o)
@@ -99,11 +119,11 @@ def update_object(oid: int, data: ObjectUpdate, user: m.User = Depends(director)
     patch = data.model_dump(exclude_unset=True)
     crew_id = patch.pop("crew_id", None)
     if "foreman_id" in patch:
-        o.crew_id = _crew_for(db, patch["foreman_id"], crew_id)
+        sync_primary_crew(db, o, _crew_for(db, patch["foreman_id"], crew_id))
         if o.salary_foreman_id is None or o.stage == "contract":
             o.salary_foreman_id = patch["foreman_id"]
     elif "crew_id" in data.model_fields_set:
-        o.crew_id = _crew_for(db, o.foreman_id, crew_id)
+        sync_primary_crew(db, o, _crew_for(db, o.foreman_id, crew_id))
     for k, v in patch.items():
         setattr(o, k, v)
     db.commit()
@@ -165,7 +185,15 @@ def del_payment(oid: int, pid: int, user: m.User = Depends(director), db: Sessio
 @router.post("/{oid}/payouts", response_model=ObjectDetail)
 def add_payout(oid: int, data: PayoutIn, user: m.User = Depends(director), db: Session = Depends(get_db)):
     o = _get(db, oid, user)
-    db.add(m.CrewPayout(object_id=o.id, crew_id=o.crew_id, foreman_id=o.foreman_id, **data.model_dump()))
+    ids = [l.crew_id for l in o.crew_links]
+    crew_id = data.crew_id
+    if crew_id is None:
+        if len(ids) > 1:
+            raise HTTPException(400, "На объекте несколько монтажников — укажите, кому выплата")
+        crew_id = ids[0] if ids else o.crew_id
+    elif crew_id not in ids:
+        raise HTTPException(400, "Этот монтажник не назначен на объект")
+    db.add(m.CrewPayout(object_id=o.id, foreman_id=o.foreman_id, **data.model_dump(exclude={"crew_id"}), crew_id=crew_id))
     db.commit()
     db.refresh(o)
     return object_out(db, o, full=True, detail=True)
@@ -179,6 +207,59 @@ def del_payout(oid: int, pid: int, user: m.User = Depends(director), db: Session
         db.delete(p)
         db.commit()
     db.refresh(o)
+    return object_out(db, o, full=True, detail=True)
+
+
+# ---------- монтажники на объекте ----------
+class ObjectCrewIn(BaseModel):
+    crew_id: int
+    amount: Decimal | None = None
+    note: str | None = None
+
+
+class ObjectCrewPatch(BaseModel):
+    amount: Decimal | None = None
+
+
+@router.post("/{oid}/crews", response_model=ObjectDetail)
+def add_object_crew(oid: int, data: ObjectCrewIn, user: m.User = Depends(director), db: Session = Depends(get_db)):
+    o = _get(db, oid, user)
+    c = db.get(m.Crew, data.crew_id)
+    if not c or not c.is_active:
+        raise HTTPException(400, "Монтажник не найден")
+    if any(l.crew_id == c.id for l in o.crew_links):
+        raise HTTPException(400, f"«{c.name}» уже на объекте")
+    o.crew_links.append(m.ObjectCrew(crew_id=c.id, amount=data.amount, note=data.note))
+    if not o.crew_id:
+        o.crew_id = c.id
+    db.commit(); db.refresh(o)
+    return object_out(db, o, full=True, detail=True)
+
+
+@router.patch("/{oid}/crews/{lid}", response_model=ObjectDetail)
+def set_object_crew(oid: int, lid: int, data: ObjectCrewPatch, user: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Задать долю монтажника; пусто — делится поровну из остатка."""
+    o = _get(db, oid, user)
+    l = next((x for x in o.crew_links if x.id == lid), None)
+    if not l:
+        raise HTTPException(404)
+    l.amount = data.amount
+    db.commit(); db.refresh(o)
+    return object_out(db, o, full=True, detail=True)
+
+
+@router.delete("/{oid}/crews/{lid}", response_model=ObjectDetail)
+def del_object_crew(oid: int, lid: int, user: m.User = Depends(director), db: Session = Depends(get_db)):
+    o = _get(db, oid, user)
+    l = next((x for x in o.crew_links if x.id == lid), None)
+    if not l:
+        raise HTTPException(404)
+    if any(p.crew_id == l.crew_id for p in o.payouts):
+        raise HTTPException(400, "Этому монтажнику уже были выплаты по объекту — сначала удалите их")
+    o.crew_links.remove(l)
+    if o.crew_id == l.crew_id:
+        o.crew_id = o.crew_links[0].crew_id if o.crew_links else None
+    db.commit(); db.refresh(o)
     return object_out(db, o, full=True, detail=True)
 
 

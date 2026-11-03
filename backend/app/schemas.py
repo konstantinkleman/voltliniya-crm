@@ -202,11 +202,24 @@ class PayoutIn(BaseModel):
     date: Date
     method: str = "transfer"
     note: str | None = None
+    crew_id: int | None = None   # кому из монтажников объекта; при одном — подставляется сам
+
+
+class CrewShare(BaseModel):
+    """Доля одного монтажника (бригады) на объекте."""
+    link_id: int | None
+    crew_id: int | None
+    crew_name: str
+    plan: Decimal
+    fixed: bool = False         # доля задана вручную
+    paid: Decimal
+    due: Decimal
 
 
 class PayoutOut(ORM, PayoutIn):
     id: int
     crew_id: int | None
+    crew_name: str | None = None
     foreman_id: int | None
 
 
@@ -301,6 +314,8 @@ class Finance(BaseModel):
     client_cost: Decimal | None = None
     profit: Decimal | None = None
     margin: Decimal | None = None
+    crews: list[CrewShare] = []         # монтажники объекта: доля, выплачено, остаток каждому
+    crew_unassigned: Decimal = Decimal(0)   # не распределено между монтажниками (если доли заданы вручную и не сходятся)
 
 
 class ObjectOut(ORM):

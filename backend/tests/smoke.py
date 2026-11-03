@@ -227,3 +227,35 @@ with c:
     assert abs((v1 - v2) - 22000) < 0.01, (v1, v2)
     assert abs(float(get("/api/stock/summary")["total_value"]) - sum(float(w["value"]) for w in get("/api/stock/warehouses"))) < 0.01
 print("STOCK OK")
+
+# --- несколько монтажников на объекте: доли, выплаты каждому, статистика без задвоения ---
+with c:
+    me = c.get("/api/me").json()
+    ma = c.post("/api/crews", json={"name": "Монтажник Иван", "foreman_id": me["id"]}).json()
+    mb = c.post("/api/crews", json={"name": "Монтажник Пётр", "foreman_id": me["id"]}).json()
+    o3 = c.post("/api/objects", json={"client_name": "Двое на объекте", "works_sum": 100000, "foreman_id": me["id"], "crew_id": ma["id"]}).json()
+    assert [x["crew_name"] for x in o3["finance"]["crews"]] == ["Монтажник Иван"] and float(o3["finance"]["crews"][0]["plan"]) == 55000
+    o3 = c.post(f"/api/objects/{o3['id']}/crews", json={"crew_id": mb["id"]}).json()
+    sh = {x["crew_name"]: x for x in o3["finance"]["crews"]}
+    assert float(sh["Монтажник Иван"]["plan"]) == 27500 and float(sh["Монтажник Пётр"]["plan"]) == 27500, sh
+    assert c.post(f"/api/objects/{o3['id']}/crews", json={"crew_id": mb["id"]}).status_code == 400          # уже на объекте
+    # выплата без указания монтажника при двоих — отказ; с указанием — по каждому
+    assert c.post(f"/api/objects/{o3['id']}/payouts", json={"amount": 1000, "date": f"{M}-10"}).status_code == 400
+    c.post(f"/api/objects/{o3['id']}/payouts", json={"amount": 20000, "date": f"{M}-10", "crew_id": ma["id"]})
+    o3 = c.post(f"/api/objects/{o3['id']}/payouts", json={"amount": 5000, "date": f"{M}-11", "crew_id": mb["id"]}).json()
+    sh = {x["crew_name"]: x for x in o3["finance"]["crews"]}
+    assert float(sh["Монтажник Иван"]["due"]) == 7500 and float(sh["Монтажник Пётр"]["due"]) == 22500, sh
+    assert {p["crew_name"] for p in o3["payouts"]} == {"Монтажник Иван", "Монтажник Пётр"}
+    # Ивану — фиксированно 35 000, Пётру — остаток
+    lid = sh["Монтажник Иван"]["link_id"]
+    o3 = c.patch(f"/api/objects/{o3['id']}/crews/{lid}", json={"amount": 35000}).json()
+    sh = {x["crew_name"]: x for x in o3["finance"]["crews"]}
+    assert float(sh["Монтажник Иван"]["plan"]) == 35000 and sh["Монтажник Иван"]["fixed"] and float(sh["Монтажник Пётр"]["plan"]) == 20000, sh
+    # статистика: каждому — своя доля, прибыль объекта делится пропорционально и в сумме равна прибыли объекта
+    cs = c.get("/api/stats/crews?date_from=2000-01&date_to=2100-12").json()
+    ia = [x for x in cs if x["name"] == "Монтажник Иван"][0]["active"]; pa = [x for x in cs if x["name"] == "Монтажник Пётр"][0]["active"]
+    assert float(ia["crew"]) == 35000 and float(pa["crew"]) == 20000 and float(ia["crew_paid"]) == 20000, (ia, pa)
+    assert abs(float(ia["profit"]) + float(pa["profit"]) - float(o3["finance"]["profit"])) < 0.05, (ia["profit"], pa["profit"], o3["finance"]["profit"])
+    # удалить монтажника с выплатами нельзя
+    assert c.delete(f"/api/objects/{o3['id']}/crews/{lid}").status_code == 400
+print("MULTI CREW OK")

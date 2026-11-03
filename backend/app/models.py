@@ -182,6 +182,7 @@ class WorkObject(Base, TimestampMixin):
     crew: Mapped["Crew | None"] = relationship()
     payments: Mapped[list["Payment"]] = relationship(back_populates="object", cascade="all, delete-orphan", order_by="Payment.date")
     payouts: Mapped[list["CrewPayout"]] = relationship(back_populates="object", cascade="all, delete-orphan", order_by="CrewPayout.date")
+    crew_links: Mapped[list["ObjectCrew"]] = relationship(back_populates="object", cascade="all, delete-orphan", order_by="ObjectCrew.id")
     extra_works: Mapped[list["ExtraWork"]] = relationship(back_populates="object", cascade="all, delete-orphan")
     materials: Mapped[list["MaterialLine"]] = relationship(back_populates="object", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="object", foreign_keys="Document.object_id", order_by="Document.id.desc()")
@@ -235,6 +236,19 @@ class Payment(Base):
     method: Mapped[str] = mapped_column(String(20), default="transfer")
     note: Mapped[str | None] = mapped_column(Text)
     object: Mapped["WorkObject"] = relationship(back_populates="payments")
+
+
+class ObjectCrew(Base):
+    """Монтажник (бригада) на объекте. Их может быть несколько; сумма бригаде объекта делится между ними:
+    amount — фиксированная доля участника, пусто — поровну из остатка."""
+    __tablename__ = "object_crews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    object_id: Mapped[int] = mapped_column(ForeignKey("objects.id"), index=True)
+    crew_id: Mapped[int] = mapped_column(ForeignKey("crews.id"))
+    amount: Mapped[Decimal | None] = mapped_column(Money)
+    note: Mapped[str | None] = mapped_column(Text)
+    object: Mapped["WorkObject"] = relationship(back_populates="crew_links")
+    crew: Mapped["Crew"] = relationship()
 
 
 class CrewPayout(Base):

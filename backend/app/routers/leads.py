@@ -125,6 +125,9 @@ def convert(lid: int, data: LeadConvert, user: m.User = Depends(director), db: S
     )
     db.add(obj)
     db.flush()
+    from .objects import sync_primary_crew
+    obj.crew_id = None
+    sync_primary_crew(db, obj, crew_id)
     db.add(m.ObjectStageLog(object_id=obj.id, stage="contract", user_id=user.id))
     for doc in lead.documents:
         doc.object_id = obj.id

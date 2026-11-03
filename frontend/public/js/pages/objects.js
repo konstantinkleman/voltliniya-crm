@@ -98,13 +98,19 @@ async function renderOne(main, id) {
           ${o.payments.map(p => `<tr><td>Платёж № ${p.number} · ${dateRu(p.date)} · ${esc(D.pay_methods[p.method] || p.method)}${p.note ? ' · ' + esc(p.note) : ''} <button class="btn s" data-del-pay="${p.id}" title="Удалить">×</button></td><td class="r num ok">+${fmt(p.amount)}</td></tr>`).join('')}
           <tr><td><b>Остаток к оплате</b></td><td class="r num"><b>${fmt(f.receivable)}</b></td></tr></table>
         <div class="row" style="margin-top:10px"><button class="btn s" data-extra>+ доп. работы</button></div></div>
-      <div class="card pad"><div class="row sp"><h2>Бригада</h2><div class="row"><button class="btn s" data-crewsum>${f.crew_overridden ? 'изменить сумму' : 'задать сумму'}</button><button class="btn s" data-payout>+ выплата</button></div></div>
+      <div class="card pad"><div class="row sp"><h2>Бригада</h2><div class="row"><button class="btn s" data-crewsum>${f.crew_overridden ? 'изменить сумму' : 'задать сумму'}</button><button class="btn s" data-addcrew>+ монтажник</button><button class="btn s p" data-payout>+ выплата</button></div></div>
         <table style="margin-top:8px">
           ${f.crew_overridden
             ? `<tr><td>Сумма бригаде по договорённости <span class="small mute">расчёт ${num(Number(f.crew_share) * 100)}% = ${fmt(f.crew_calc)}, ${Number(f.crew_plan) < Number(f.crew_calc) ? 'на ' + fmt(Number(f.crew_calc) - Number(f.crew_plan)) + ' меньше' : 'на ' + fmt(Number(f.crew_plan) - Number(f.crew_calc)) + ' больше'}</span></td><td class="r num">${fmt(f.crew_plan)}</td></tr>`
-            : `<tr><td>Сумма бригаде · ${num(Number(f.crew_share) * 100)}% от ${fmt(f.works_base)}</td><td class="r num">${fmt(f.crew_plan)}</td></tr>`}
-          ${o.payouts.map(p => `<tr><td>${dateRu(p.date)} · ${esc(D.pay_methods[p.method] || p.method)}${p.note ? ' · ' + esc(p.note) : ''} <button class="btn s" data-del-payout="${p.id}" title="Удалить">×</button></td><td class="r num">${fmt(p.amount)}</td></tr>`).join('')}
-          <tr><td><b>Остаток бригаде</b></td><td class="r num"><b>${fmt(f.crew_due)}</b></td></tr></table></div>
+            : `<tr><td>Сумма бригаде · ${num(Number(f.crew_share) * 100)}% от ${fmt(f.works_base)}</td><td class="r num">${fmt(f.crew_plan)}</td></tr>`}</table>
+        ${f.crews.length ? `<table style="margin-top:6px"><tr><th>Монтажник</th><th class="r">Доля</th><th class="r">Выплачено</th><th class="r">Остаток</th><th></th></tr>
+          ${f.crews.map(c => `<tr><td><b>${esc(c.crew_name)}</b></td><td class="r num">${c.link_id ? `<a href="#" data-share="${c.link_id}" title="Задать долю">${fmt(c.plan)}</a><div class="small mute">${c.fixed ? 'задана вручную' : (f.crews.filter(x => x.link_id).length > 1 ? (f.crews.some(x => x.fixed) ? 'остаток суммы' : 'поровну') : '')}</div>` : '—'}</td><td class="r num">${fmt(c.paid)}</td><td class="r num ${Number(c.due) > 0 ? 'copper' : Number(c.due) < 0 ? 'warn' : ''}"><b>${fmt(c.due)}</b></td>
+            <td class="r">${c.link_id ? `<button class="btn s" data-payto="${c.crew_id}" title="Выплата этому монтажнику">₽</button>${f.crews.filter(x => x.link_id).length > 1 ? ` <button class="btn s" data-rmcrew="${c.link_id}" title="Убрать с объекта">×</button>` : ''}` : ''}</td></tr>`).join('')}</table>`
+          : `<div class="infobox" style="margin-top:8px">Монтажник не назначен — нажмите «+ монтажник».</div>`}
+        ${Number(f.crew_unassigned) > 0.5 && f.crews.length ? `<div class="warnbox">Не распределено между монтажниками ${fmt(f.crew_unassigned)} — доли заданы вручную и в сумме меньше суммы бригаде.</div>` : ''}
+        ${Number(f.crew_unassigned) < -0.5 ? `<div class="warnbox">Доли монтажников в сумме больше суммы бригаде на ${fmt(-Number(f.crew_unassigned))}.</div>` : ''}
+        ${o.payouts.length ? `<div class="small mute" style="margin:12px 0 4px"><b>Выплаты</b></div><table>${o.payouts.map(p => `<tr><td>${dateRu(p.date)} · ${esc(p.crew_name || 'без монтажника')} · ${esc(D.pay_methods[p.method] || p.method)}${p.note ? ' · ' + esc(p.note) : ''} <button class="btn s" data-del-payout="${p.id}" title="Удалить">×</button></td><td class="r num">${fmt(p.amount)}</td></tr>`).join('')}</table>` : ''}
+        <table style="margin-top:6px"><tr><td><b>Остаток бригаде всего</b></td><td class="r num"><b>${fmt(f.crew_due)}</b></td></tr></table></div>
     </div>
   </div>
   <div class="card pad" style="margin-top:14px"><div class="row sp"><h2>Материалы на объекте</h2><div class="row"><button class="btn s p" data-mat-stock>Списать со склада</button><button class="btn s" data-mat-return>Вернуть на склад</button><button class="btn s" data-mat>+ вручную</button></div></div>
@@ -146,9 +152,32 @@ async function renderOne(main, id) {
   main.querySelector('[data-crewsum]').onclick = () => formModal({ title: 'Сумма бригаде', intro: `Расчёт по правилу: ${num(Number(f.crew_share) * 100)}% от работ ${fmt(f.works_base)} = ${fmt(f.crew_calc)}. Укажите, о чём договорились с бригадой; пустое поле — вернуть расчёт.`, submit: 'Сохранить',
     fields: [{ name: 'amount', label: 'Сумма бригаде, ₽', type: 'number', value: f.crew_plan }],
     onSubmit: async (v) => { await api.post(`/api/objects/${id}/crew-sum`, { amount: v.amount }); toast(v.amount === null ? 'Возвращён расчёт по правилу' : 'Сумма бригаде сохранена'); reload(); } });
-  main.querySelector('[data-payout]').onclick = () => formModal({ title: 'Выплата бригаде', intro: `Через прораба ${esc(o.foreman_name || '')}. План ${fmt(f.crew_plan)}, остаток ${fmt(f.crew_due)}.`, submit: 'Записать',
-    fields: [{ name: 'amount', label: 'Сумма, ₽', type: 'number', required: true, value: Math.max(Number(f.crew_due), 0) }, { name: 'date', label: 'Дата', type: 'date', value: today() }, { name: 'method', label: 'Способ', type: 'select', options: opt(D.pay_methods) }, { name: 'note', label: 'Комментарий' }],
-    onSubmit: async (v) => { await api.post(`/api/objects/${id}/payouts`, v); toast('Выплата записана'); reload(); } });
+  // выплата: монтажнику из списка объекта; если он один — выбор не показываем
+  const crewsOn = f.crews.filter(c => c.link_id);
+  const payout = (crewId = null) => {
+    const cur = crewsOn.find(c => c.crew_id === crewId) || crewsOn.find(c => Number(c.due) > 0) || crewsOn[0];
+    const fields = [
+      ...(crewsOn.length > 1 ? [{ name: 'crew_id', label: 'Кому', type: 'select', options: crewsOn.map(c => ({ value: c.crew_id, label: `${c.crew_name} · остаток ${fmt(c.due)}` })), value: cur?.crew_id }] : []),
+      { name: 'amount', label: 'Сумма, ₽', type: 'number', required: true, value: Math.max(Number(cur ? cur.due : f.crew_due), 0) }, { name: 'date', label: 'Дата', type: 'date', value: today() }, { name: 'method', label: 'Способ', type: 'select', options: opt(D.pay_methods) }, { name: 'note', label: 'Комментарий' }];
+    const m = formModal({ title: 'Выплата монтажнику', intro: `${cur ? esc(cur.crew_name) + ': доля ' + fmt(cur.plan) + ', выплачено ' + fmt(cur.paid) + ', остаток ' + fmt(cur.due) + '.' : 'План ' + fmt(f.crew_plan) + ', остаток ' + fmt(f.crew_due) + '.'}${o.foreman_name ? ' Через прораба ' + esc(o.foreman_name) + '.' : ''}`, submit: 'Записать', fields,
+      onSubmit: async (v) => { v.crew_id = v.crew_id ? Number(v.crew_id) : (cur ? cur.crew_id : null); await api.post(`/api/objects/${id}/payouts`, v); toast('Выплата записана'); reload(); } });
+    // при смене монтажника подставляем его остаток
+    m.querySelector('[name=crew_id]')?.addEventListener('change', (e) => { const c = crewsOn.find(x => String(x.crew_id) === e.target.value); if (c) m.querySelector('[name=amount]').value = Math.max(Number(c.due), 0); });
+  };
+  main.querySelector('[data-payout]').onclick = () => payout();
+  main.querySelectorAll('[data-payto]').forEach(b => b.onclick = () => payout(Number(b.dataset.payto)));
+  main.querySelector('[data-addcrew]').onclick = async () => {
+    const all = (await api.get('/api/crews')).filter(c => c.is_active && !crewsOn.some(x => x.crew_id === c.id));
+    if (!all.length) return toast('Все монтажники уже на объекте — новых можно завести в разделе «Прорабы и бригады»', true);
+    formModal({ title: 'Добавить монтажника на объект', intro: 'Сумма бригаде делится между монтажниками поровну; долю каждого можно задать вручную, нажав на неё.', submit: 'Добавить',
+      fields: [{ name: 'crew_id', label: 'Монтажник', type: 'select', options: all.map(c => ({ value: c.id, label: c.name + (c.foreman_name ? ' · ' + c.foreman_name : '') })) }],
+      onSubmit: async (v) => { await api.post(`/api/objects/${id}/crews`, { crew_id: Number(v.crew_id) }); toast('Монтажник добавлен'); reload(); } });
+  };
+  main.querySelectorAll('[data-share]').forEach(a => a.onclick = (e) => { e.preventDefault(); const c = crewsOn.find(x => String(x.link_id) === a.dataset.share);
+    formModal({ title: `Доля: ${c.crew_name}`, intro: `Сумма бригаде по объекту ${fmt(f.crew_plan)}. Пустое поле — доля считается поровну из остатка.`, submit: 'Сохранить',
+      fields: [{ name: 'amount', label: 'Доля монтажника, ₽', type: 'number', value: c.fixed ? c.plan : '' }],
+      onSubmit: async (v) => { await api.patch(`/api/objects/${id}/crews/${c.link_id}`, { amount: v.amount }); toast('Доля сохранена'); reload(); } }); });
+  main.querySelectorAll('[data-rmcrew]').forEach(b => b.onclick = () => confirmModal('Убрать монтажника с объекта? Его доля перейдёт остальным.', async () => { await api.del(`/api/objects/${id}/crews/${b.dataset.rmcrew}`); reload(); }, 'Убрать'));
   main.querySelector('[data-extra]').onclick = () => formModal({ title: 'Дополнительные работы', intro: 'Оплаченные клиентом сверх сметы. Входят в базу для доли бригады.', submit: 'Добавить',
     fields: [{ name: 'title', label: 'Что сделали', required: true }, { name: 'amount', label: 'Сумма, ₽', type: 'number', required: true }, { name: 'date', label: 'Дата', type: 'date', value: today() }],
     onSubmit: async (v) => { await api.post(`/api/objects/${id}/extra-works`, v); reload(); } });

@@ -32,6 +32,13 @@ def startup():
     Base.metadata.create_all(engine)
     migrate()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    with SessionLocal() as db:
+        # монтажники на объекте: перенести старую «одну бригаду объекта» в список участников
+        linked = {oc.object_id for oc in db.scalars(select(m.ObjectCrew)).all()}
+        for o in db.scalars(select(m.WorkObject).where(m.WorkObject.crew_id.is_not(None))).all():
+            if o.id not in linked:
+                db.add(m.ObjectCrew(object_id=o.id, crew_id=o.crew_id))
+        db.commit()
     if settings.ADMIN_EMAIL and settings.ADMIN_PASSWORD:
         with SessionLocal() as db:
             if not db.scalar(select(m.User).where(m.User.email == settings.ADMIN_EMAIL.lower())):
