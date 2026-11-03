@@ -9,19 +9,31 @@ export async function render(main, r, state) {
   S = state; D = state.dicts;
   if (r.id) return renderOne(main, Number(r.id));
   const objs = await api.get('/api/objects');
-  const active = objs.filter(o => !['act', 'warranty'].includes(o.stage));
-  main.innerHTML = `<div class="head"><div><h1>Объекты</h1><p>${active.length} в работе · ${objs.length - active.length} сдано</p></div>
+  const isDone = (o) => ['act', 'warranty'].includes(o.stage);
+  const active = objs.filter(o => !isDone(o)), done = objs.filter(isDone);
+  // по умолчанию — объекты в работе; сданные — отдельной вкладкой
+  const tab = ['active', 'done', 'all'].includes(r.q.get('tab')) ? r.q.get('tab') : 'active';
+  const stageIdx = (o) => D.object_stages.indexOf(o.stage);
+  const list = tab === 'active' ? [...active].sort((a, b) => stageIdx(b) - stageIdx(a) || b.id - a.id)
+    : tab === 'done' ? [...done].sort((a, b) => String(b.end_date || '').localeCompare(String(a.end_date || '')) || b.id - a.id)
+    : objs;
+  const sum = (k) => list.reduce((a, o) => a + Number(o.finance[k] || 0), 0);
+  main.innerHTML = `<div class="head"><div><h1>Объекты</h1><p>${active.length} в работе · ${done.length} сдано</p></div>
     <button class="btn p" data-new>Объект без заявки</button></div>
-    ${objs.length ? `<div class="card wrap"><table><tr><th>Объект</th><th>Этап</th><th>Прораб · бригада</th><th class="r">Договор</th><th class="r">Получено</th><th class="r">Прибыль</th><th class="r">Бригада</th></tr>
-    ${objs.map(o => { const f = o.finance; return `<tr class="click" data-id="${o.id}">
+    <div class="row sp" style="margin-bottom:14px"><div class="seg"><button class="${tab === 'active' ? 'on' : ''}" data-tab="active">В работе · ${active.length}</button><button class="${tab === 'done' ? 'on' : ''}" data-tab="done">Сданные · ${done.length}</button><button class="${tab === 'all' ? 'on' : ''}" data-tab="all">Все · ${objs.length}</button></div>
+      ${list.length ? `<span class="small mute">договоров на ${fmt(sum('contract_total'))} · получено ${fmt(sum('received'))}${tab !== 'done' ? ' · клиенты должны ' + fmt(sum('receivable')) : ''}</span>` : ''}</div>
+    ${list.length ? `<div class="card wrap"><table><tr><th>Объект</th><th>${tab === 'done' ? 'Сдан' : 'Этап'}</th><th>Прораб · бригада</th><th class="r">Договор</th><th class="r">Получено</th><th class="r">Прибыль</th><th class="r">Бригада</th></tr>
+    ${list.map(o => { const f = o.finance; return `<tr class="click" data-id="${o.id}">
       <td><b>${esc(o.client_name)}</b><div class="small mute">${o.area_m2 ? num(o.area_m2) + ' м² · ' : ''}${esc(o.address || '')}${o.tariff ? ' · ' + esc(o.tariff) : ''}</div></td>
-      <td><span class="tag ${['act', 'warranty'].includes(o.stage) ? 'ok' : 'act'}">${esc(D.object_stage_names[o.stage])}</span></td>
+      <td><span class="tag ${isDone(o) ? 'ok' : 'act'}">${esc(D.object_stage_names[o.stage])}</span>${isDone(o) && o.end_date ? `<div class="small mute">${dateRu(o.end_date)}</div>` : ''}</td>
       <td>${esc(o.foreman_name || '—')}<div class="small mute">${esc(o.crew_name || '')}</div></td>
       <td class="r num">${fmt(f.contract_total)}</td>
       <td class="r num">${fmt(f.received)}<div class="small mute">${pct(f.received, f.contract_total)}</div></td>
       <td class="r num"><b class="${Number(f.profit) < 0 ? 'warn' : ''}">${fmt(f.profit)}</b><div class="small mute">${f.margin !== null ? num(f.margin) + '%' : '—'}</div></td>
       <td class="r num">${crewShareCell(f)}</td></tr>`; }).join('')}</table></div>`
+    : objs.length ? emptyState(tab === 'done' ? 'Сданных объектов пока нет' : 'Объектов в работе нет', tab === 'done' ? 'Объект попадает сюда на этапе «Акт подписан».' : 'Все объекты сданы — они во вкладке «Сданные».')
     : emptyState('Объектов пока нет', 'Объект появляется из заявки на этапе «Договор». Можно завести и напрямую.')}`;
+  main.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => location.hash = '#/objects' + (b.dataset.tab === 'active' ? '' : '?tab=' + b.dataset.tab));
   main.querySelector('[data-new]').onclick = newObject;
   main.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => location.hash = '#/objects/' + tr.dataset.id);
 }
@@ -78,7 +90,7 @@ async function renderOne(main, id) {
   const over = Number(f.crew_paid) > Number(f.crew_plan) + 0.5;
 
   main.innerHTML = `
-  <div class="head"><div><a class="btn s" href="#/objects">← Объекты</a><h1 style="margin-top:8px">${esc(o.client_name)}</h1>
+  <div class="head"><div><a class="btn s" href="#/objects${['act', 'warranty'].includes(o.stage) ? '?tab=done' : ''}">← Объекты</a><h1 style="margin-top:8px">${esc(o.client_name)}</h1>
     <p>${esc(o.address || 'адрес не указан')}${o.area_m2 ? ' · ' + num(o.area_m2) + ' м²' : ''}${o.tariff ? ' · ' + esc(o.tariff) : ''} · ${o.foreman_name ? 'прораб ' + esc(o.foreman_name) + (o.crew_name ? ', ' + esc(o.crew_name) : '') : '<span class="warn">прораб не назначен</span>'}${o.contract_number ? ' · договор № ' + esc(o.contract_number) : ''}</p></div>
     <div class="row"><button class="btn" data-foreman>${o.foreman_id ? 'Прораб / бригада' : 'Назначить прораба'}</button><button class="btn" data-edit>Изменить</button>${idx < stages.length - 1 ? `<button class="btn p" data-next>Следующий этап: ${esc(D.object_stage_names[stages[idx + 1]])}</button>` : ''}</div></div>
   <div class="card"><div class="stepper">${stages.map((s, i) => `<button class="step ${i < idx ? 'done' : i === idx ? 'cur' : ''}" data-stage="${s}" title="Перевести на этот этап">${esc(D.object_stage_names[s])}</button>`).join('')}</div></div>
