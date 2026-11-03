@@ -215,12 +215,13 @@ def match_products(db: Session, lines: list[dict]) -> list[dict]:
     названию и по буквальному тексту накладной (он хранится в note позиции с прошлых приходов)."""
     prods = db.scalars(select(Product).where(Product.is_active == True)).all()  # noqa: E712
     index = {p.id: _norm(p.name) for p in prods}
-    raw_index = {p.id: _norm(p.note or "") for p in prods}
+    # в note — буквальные названия из накладных и старые названия объединённых позиций, по строке на каждое
+    raw_index = {p.id: [_norm(x) for x in (p.note or "").splitlines() if x.strip()] for p in prods}
     by_name = {}
     for p in prods:
         by_name.setdefault(index[p.id], p)
-        if raw_index[p.id]:
-            by_name.setdefault(raw_index[p.id], p)
+        for r in raw_index[p.id]:
+            by_name.setdefault(r, p)
     out = []
     for ln in lines:
         n = _norm(ln["name"]); nr = _norm(ln.get("raw") or "")
@@ -230,7 +231,12 @@ def match_products(db: Session, lines: list[dict]) -> list[dict]:
         elif nr and nr in by_name:
             pid = by_name[nr].id
         else:
-            scored = sorted(((max(_score(n, index[p.id]), _score(nr, raw_index[p.id]) if nr and raw_index[p.id] else 0), p) for p in prods), key=lambda x: -x[0])
+            def best(p):
+                vals = [_score(n, index[p.id])] + [_score(n, r) for r in raw_index[p.id]]
+                if nr:
+                    vals += [_score(nr, r) for r in raw_index[p.id]]
+                return max(vals)
+            scored = sorted(((best(p), p) for p in prods), key=lambda x: -x[0])
             cands = [{"id": p.id, "name": p.name, "unit": p.unit, "score": round(r, 2)} for r, p in scored[:4] if r >= 0.4]
             if scored and scored[0][0] >= 0.75 and (len(scored) < 2 or scored[0][0] - scored[1][0] >= 0.15):
                 pid = scored[0][1].id

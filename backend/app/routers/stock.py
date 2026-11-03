@@ -240,11 +240,76 @@ def list_products(warehouse_id: int | None = None, category_id: int | None = Non
     return _products_out(db, db.scalars(qs).all(), bal, visible if not user.is_director or warehouse_id else None)
 
 
+class ProductCreate(ProductIn):
+    # начальный остаток: позиция уже лежит на складе, приход по накладной не оформлялся
+    init_warehouse_id: int | None = None
+    init_qty: Decimal | None = None
+    init_cost: Decimal | None = None
+
+
 @router.post("/products", response_model=ProductOut)
-def create_product(data: ProductIn, _: m.User = Depends(director), db: Session = Depends(get_db)):
-    p = m.Product(**data.model_dump())
-    db.add(p); db.commit(); db.refresh(p)
-    return _products_out(db, [p], {}, None)[0]
+def create_product(data: ProductCreate, user: m.User = Depends(director), db: Session = Depends(get_db)):
+    p = m.Product(**data.model_dump(exclude={"init_warehouse_id", "init_qty", "init_cost"}))
+    db.add(p); db.flush()
+    if data.init_qty and data.init_qty > 0:
+        if not data.init_warehouse_id:
+            raise HTTPException(400, "Для начального остатка укажите склад")
+        S.receipt(db, warehouse_id=data.init_warehouse_id, lines=[{"product_id": p.id, "qty": data.init_qty, "unit_cost": data.init_cost or 0}],
+                  date=Date.today(), supplier=None, doc_number=None, note="начальный остаток", user_id=user.id, batch=uuid.uuid4().hex[:12])
+    db.commit(); db.refresh(p)
+    return _products_out(db, [p], S.all_balances(db), None)[0]
+
+
+@router.delete("/products/{pid}")
+def delete_product(pid: int, force: bool = False, user: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Удалить позицию. Без движений — удаляется совсем. С движениями — остаток должен быть нулевым
+    (или force=true: остаток списывается инвентаризацией в ноль), позиция уходит в архив, история проводок остаётся."""
+    p = db.get(m.Product, pid)
+    if not p:
+        raise HTTPException(404)
+    mvs = db.scalars(select(m.StockMovement).where(m.StockMovement.product_id == pid)).all()
+    if not mvs:
+        db.delete(p); db.commit()
+        return {"ok": True, "deleted": True}
+    whs = {w.id: w for w in db.scalars(select(m.Warehouse)).all()}
+    left = {wid: qty for (wid, ppid), (qty, _) in S.all_balances(db).items() if ppid == pid and qty > 0}
+    if any(not mv.confirmed for mv in mvs):
+        raise HTTPException(400, "По позиции есть перемещение в пути — сначала подтвердите или отмените его")
+    if left and not force:
+        txt = ", ".join(f"{whs[w].name if w in whs else w}: {qty:g} {p.unit}" for w, qty in left.items())
+        raise HTTPException(409, f"На складах есть остаток ({txt}). Удалить вместе с остатком?")
+    for wid in left:
+        S.adjust(db, warehouse_id=wid, product_id=pid, actual_qty=Decimal(0), date=Date.today(), note="удаление позиции", user_id=user.id)
+    p.is_active = False
+    db.commit()
+    return {"ok": True, "deleted": False, "archived": True}
+
+
+class MergeIn(BaseModel):
+    into_id: int
+
+
+@router.post("/products/{pid}/merge", response_model=ProductOut)
+def merge_product(pid: int, data: MergeIn, _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Объединить позицию с другой: все проводки переходят к целевой, остатки складываются,
+    старое название запоминается для распознавания накладных. Исходная позиция удаляется."""
+    src, dst = db.get(m.Product, pid), db.get(m.Product, data.into_id)
+    if not src or not dst:
+        raise HTTPException(404, "Позиция не найдена")
+    if src.id == dst.id:
+        raise HTTPException(400, "Это одна и та же позиция")
+    if src.unit != dst.unit:
+        raise HTTPException(400, f"Разные единицы: {src.unit} и {dst.unit}. Сначала приведите к одной.")
+    for mv in db.scalars(select(m.StockMovement).where(m.StockMovement.product_id == src.id)).all():
+        mv.product_id = dst.id
+    aliases = [x for x in [src.name, src.note] if x and x != dst.name]
+    dst.note = "\n".join([x for x in [dst.note, *aliases] if x]) or None
+    for f in ("sku", "pack_qty", "pack_name", "min_qty", "client_price", "category_id"):
+        if getattr(dst, f) in (None, "") and getattr(src, f) not in (None, ""):
+            setattr(dst, f, getattr(src, f))
+    db.delete(src)
+    db.commit(); db.refresh(dst)
+    return _products_out(db, [dst], S.all_balances(db), None)[0]
 
 
 @router.patch("/products/{pid}", response_model=ProductOut)
@@ -518,7 +583,7 @@ def summary(_: m.User = Depends(director), db: Session = Depends(get_db)):
     by_wh = {}
     low = []
     for (wid, pid), (q, c) in bal.items():
-        if q <= 0:
+        if q <= 0 or (pid in prods and not prods[pid].is_active):
             continue
         by_wh.setdefault(wid, Decimal(0)); by_wh[wid] += q * c
         p = prods.get(pid)

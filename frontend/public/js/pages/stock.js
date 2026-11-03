@@ -93,14 +93,22 @@ function prodFields(p) {
     { name: 'pack_name', label: 'Название упаковки', value: p?.pack_name || '', placeholder: 'бухта' },
     { name: 'min_qty', label: 'Минимальный остаток (уведомление «пора докупить»)', type: 'number', step: '0.001', value: p?.min_qty ?? '' },
     { name: 'client_price', label: 'Цена клиенту, ₽', type: 'number', step: '0.01', value: p?.client_price ?? '' },
-    { name: 'sku', label: 'Артикул', value: p?.sku || '' }, { name: 'note', label: 'Заметка', value: p?.note || '' },
+    { name: 'sku', label: 'Артикул', value: p?.sku || '' }, { name: 'note', label: 'Заметка', value: p?.note || '', type: 'textarea', placeholder: 'Как позиция называется в накладных — по строке на название' },
+    ...(p ? [] : [
+      { name: 'init_qty', label: 'Уже лежит на складе — количество (если позиция уже есть, без накладной)', type: 'number', step: '0.001', inputmode: 'decimal' },
+      { name: 'init_cost', label: 'Себестоимость за единицу, ₽ (для начального остатка)', type: 'number', step: '0.01', inputmode: 'decimal' },
+      { name: 'init_warehouse_id', label: 'На какой склад', type: 'select', options: whs.map(w => ({ value: w.id, label: w.name })), value: whSel || '' },
+    ]),
   ];
 }
 const cleanProd = (v) => ({ ...v, category_id: v.category_id ? Number(v.category_id) : null, is_active: true });
 
 function prodForm(main, r, p) {
   formModal({ title: p ? 'Позиция' : 'Новая позиция', submit: p ? 'Сохранить' : 'Создать', fields: prodFields(p),
-    onSubmit: async (v) => { if (p) await api.patch('/api/stock/products/' + p.id, cleanProd(v)); else await api.post('/api/stock/products', cleanProd(v)); toast('Сохранено'); closeDrawer(); render(main, r, S); } });
+    onSubmit: async (v) => {
+      if (p) await api.patch('/api/stock/products/' + p.id, cleanProd(v));
+      else { v.init_warehouse_id = v.init_qty ? Number(v.init_warehouse_id) : null; await api.post('/api/stock/products', cleanProd(v)); }
+      toast(v.init_qty ? 'Позиция создана, остаток поставлен на склад' : 'Сохранено'); closeDrawer(); render(main, r, S); } });
 }
 
 async function prodDrawer(main, r, pid) {
@@ -111,12 +119,25 @@ async function prodDrawer(main, r, pid) {
     ${whs.map(w => { const st = p.stock[w.id]; return st ? `<dt>${esc(w.name)}</dt><dd class="num">${num(st.qty, 3)} ${esc(p.unit)} · себест. ${num(st.avg_cost, 2)} ₽</dd>` : ''; }).join('')}
     <dt>Клиенту</dt><dd>${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn">не задана</span>'}</dd>
     <dt>Минимум</dt><dd>${p.min_qty ? num(p.min_qty) + ' ' + esc(p.unit) : '—'}</dd></dl>
-    <div class="row"><button class="btn" data-edit>Изменить</button>${whSel && p.stock[whSel] ? `<button class="btn p" data-issue>Списать на объект</button>` : ''}<button class="btn" data-off>${p.is_active ? 'Скрыть' : 'Вернуть'}</button></div>
+    <div class="row"><button class="btn" data-edit>Изменить</button>${whSel && p.stock[whSel] ? `<button class="btn p" data-issue>Списать на объект</button>` : ''}<button class="btn" data-merge title="Это та же позиция под другим названием">Объединить с…</button><button class="btn" data-del>Удалить</button></div>
     <h3 style="margin-top:20px">Движения</h3><table style="margin-top:6px"><tr><th>Дата</th><th>Что</th><th class="r">Кол-во</th><th class="r">Цена</th></tr>
     ${mvs.map(mv => `<tr class="${mv.confirmed ? '' : 'mute'}"><td class="num">${dateRu(mv.date)}</td><td>${esc(mv.kind_name)}${mv.object_name ? ' · ' + esc(mv.object_name) : ''}${mv.supplier ? ' · ' + esc(mv.supplier) : ''}<div class="small mute">${esc(mv.warehouse_name)}${mv.user_name ? ' · ' + esc(mv.user_name) : ''}${!mv.confirmed ? ' · в пути' : ''}</div></td><td class="r num ${Number(mv.qty) < 0 ? 'copper' : 'ok'}">${Number(mv.qty) > 0 ? '+' : ''}${num(mv.qty, 3)}</td><td class="r num">${num(mv.unit_cost, 2)} ₽</td></tr>`).join('') || '<tr><td colspan="4" class="mute">Движений не было</td></tr>'}</table>`);
   d.querySelector('[data-edit]').onclick = () => prodForm(main, r, p);
   d.querySelector('[data-issue]')?.addEventListener('click', () => issueModal(main, r, pid));
-  d.querySelector('[data-off]').onclick = async () => { await api.patch('/api/stock/products/' + pid, { ...p, is_active: !p.is_active }); closeDrawer(); render(main, r, S); };
+  d.querySelector('[data-del]').onclick = () => confirmModal(`Удалить позицию «${p.name}»?`, async () => {
+    try { await api.del('/api/stock/products/' + pid); }
+    catch (err) {
+      if (err.status !== 409) throw err;
+      // на складах есть остаток — спросим ещё раз и удалим вместе с ним (остаток спишется инвентаризацией в ноль)
+      await new Promise((res, rej) => setTimeout(() => confirmModal(err.message, async () => { await api.del('/api/stock/products/' + pid + '?force=true'); res(); }, 'Удалить с остатком'), 50));
+    }
+    toast('Позиция удалена'); closeDrawer(); render(main, r, S); }, 'Удалить');
+  d.querySelector('[data-merge]').onclick = () => {
+    const others = prods.filter(x => x.id !== pid).map(x => ({ value: x.id, label: x.name, sub: `${x.unit}${x.category_path ? ' · ' + x.category_path : ''}${x.total_qty ? ' · ' + num(x.total_qty, 3) : ''}` }));
+    formModal({ title: 'Объединить позиции', intro: `«${esc(p.name)}» будет влита в выбранную: остатки и история движений сложатся, старое название запомнится для распознавания накладных. Единицы измерения должны совпадать.`, submit: 'Объединить',
+      fields: [{ name: 'into_id', label: 'Оставить позицию', type: 'combo', required: true, options: others }],
+      onSubmit: async (v) => { if (!v.into_id) { toast('Выберите позицию', true); return false; } await api.post(`/api/stock/products/${pid}/merge`, { into_id: Number(v.into_id) }); toast('Позиции объединены'); closeDrawer(); render(main, r, S); } });
+  };
 }
 
 // ---------- приход: несколько строк, позиции на лету ----------
@@ -262,12 +283,17 @@ async function pendingDrawer(main, r) {
 }
 
 function adjustModal(main, r) {
-  const mine = prods.filter(p => p.stock[whSel]);
-  if (!mine.length) return toast('На этом складе нет остатков', true);
-  const m = openModal(`<h2>Инвентаризация · ${esc(whs.find(w => w.id === whSel)?.name)}</h2><p class="small mute" style="margin:6px 0 0">Введите фактический остаток там, где он отличается. Разница спишется или добавится отдельной проводкой с датой.</p><form>
-    <table style="margin-top:10px"><tr><th>Позиция</th><th class="r">Учёт</th><th class="r">Факт</th></tr>${mine.map(p => `<tr><td>${esc(p.name)}</td><td class="r num">${num(p.stock[whSel].qty, 3)} ${esc(p.unit)}</td><td class="r"><input name="a${p.id}" type="number" step="0.001" inputmode="decimal" placeholder="${num(p.stock[whSel].qty, 3)}" style="width:100px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);text-align:right"></td></tr>`).join('')}</table>
+  // все активные позиции: сначала те, что есть на складе, потом с нулевым учётом — чтобы поставить на учёт то, что завели без количества
+  const qty = (p) => Number(p.stock[whSel]?.qty || 0);
+  const mine = [...prods].sort((a, b) => (qty(b) > 0) - (qty(a) > 0) || a.name.localeCompare(b.name, 'ru'));
+  if (!mine.length) return toast('Нет позиций', true);
+  const m = openModal(`<h2>Инвентаризация · ${esc(whs.find(w => w.id === whSel)?.name)}</h2><p class="small mute" style="margin:6px 0 0">Введите фактический остаток там, где он отличается. Разница спишется или добавится отдельной проводкой с датой. Позиции с нулевым учётом — ниже, их тоже можно поставить на учёт.</p><form>
+    <input data-inv-q placeholder="Поиск по названию" style="margin-top:10px;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)">
+    <table style="margin-top:10px"><tr><th>Позиция</th><th class="r">Учёт</th><th class="r">Факт</th></tr>${mine.map(p => `<tr data-inv="${esc(p.name.toLowerCase())}" class="${qty(p) > 0 ? '' : 'mute'}"><td>${esc(p.name)}<div class="small mute">${esc(p.category_path || '')}</div></td><td class="r num">${num(qty(p), 3)} ${esc(p.unit)}</td><td class="r"><input name="a${p.id}" type="number" step="0.001" inputmode="decimal" placeholder="${num(qty(p), 3)}" style="width:100px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);text-align:right"></td></tr>`).join('')}</table>
     <div class="field"><label>Комментарий</label><input name="note"></div><div class="actions"><button type="button" class="btn" data-cancel>Отмена</button><button type="submit" class="btn p">Провести</button></div></form>`);
+  m.querySelector('.box').style.width = 'min(640px,100%)';
   m.querySelector('[data-cancel]').onclick = closeModal;
+  m.querySelector('[data-inv-q]').oninput = (e) => { const q = e.target.value.trim().toLowerCase(); m.querySelectorAll('tr[data-inv]').forEach(tr => tr.classList.toggle('hidden', !!q && !tr.dataset.inv.includes(q))); };
   m.querySelector('form').onsubmit = async (e) => { e.preventDefault(); const f = e.target; const lines = [];
     for (const p of mine) { const v = f[`a${p.id}`].value; if (v !== '') lines.push({ product_id: p.id, actual_qty: Number(v) }); }
     if (!lines.length) return toast('Ничего не изменено', true);

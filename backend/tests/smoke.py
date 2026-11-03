@@ -195,4 +195,28 @@ with c:
     o2 = post("/api/objects", json={"client_name": "Три", "works_sum": 100000, "foreman_id": f2["id"], "crew_id": cB["id"]}); assert o2["crew_name"] == "Бригада Б"
     assert c.post("/api/objects", json={"client_name": "Чужая", "works_sum": 1, "foreman_id": me["id"], "crew_id": cB["id"]}).status_code == 400
     o2 = c.patch(f"/api/objects/{o2['id']}", json={"crew_id": cA["id"]}).json(); assert o2["crew_name"] == "Бригада А"
+    # --- позиция с начальным остатком, объединение, удаление ---
+    s1 = post("/api/stock/products", json={"name": "Стяжка кабельная 200", "unit": "упак", "init_warehouse_id": wh["id"], "init_qty": 10, "init_cost": 150})
+    assert float(s1["stock"][str(wh["id"])]["qty"]) == 10 and float(s1["stock"][str(wh["id"])]["avg_cost"]) == 150, s1
+    # дубль под другим названием → объединяем в основную
+    dup = post("/api/stock/products", json={"name": "Кабель ВВГнг-LS 3×2,5", "unit": "м", "note": "Кабель ВВГнг(А)-LS 3х2,5 бухта"})
+    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": f"{M}-20", "lines": [{"product_id": dup["id"], "qty": 100, "unit_cost": 90}]})
+    before_qty = float([x for x in get(f"/api/stock/products?warehouse_id={wh['id']}") if x["id"] == p1["id"]][0]["stock"][str(wh["id"])]["qty"])
+    assert c.post(f"/api/stock/products/{dup['id']}/merge", json={"into_id": p2["id"]}).status_code == 400   # разные единицы
+    merged = post(f"/api/stock/products/{dup['id']}/merge", json={"into_id": p1["id"]})
+    assert float(merged["stock"][str(wh["id"])]["qty"]) == before_qty + 100 and "Кабель ВВГнг-LS 3×2,5" in merged["note"], merged
+    assert c.get(f"/api/stock/products?include_inactive=true").json() and not any(x["id"] == dup["id"] for x in get("/api/stock/products?include_inactive=true"))
+    # распознавание теперь узнаёт старое название: проверяем сопоставление напрямую
+    from app import invoice_ai as IA
+    from app.db import SessionLocal
+    with SessionLocal() as db_:
+        r_ = IA.match_products(db_, [{"name": "Кабель ВВГнг-LS 3×2,5", "raw": "Кабель ВВГнг(А)-LS 3х2,5 бухта"}])
+        assert r_[0]["product_id"] == p1["id"], r_
+    # удаление: без движений — совсем; с остатком — сначала отказ 409, с force — списание в ноль и архив
+    tmp = post("/api/stock/products", json={"name": "Временная", "unit": "шт"})
+    assert c.delete(f"/api/stock/products/{tmp['id']}").json()["deleted"] is True
+    r = c.delete(f"/api/stock/products/{s1['id']}"); assert r.status_code == 409, r.text
+    r = c.delete(f"/api/stock/products/{s1['id']}?force=true"); assert r.status_code == 200 and r.json()["archived"], r.text
+    assert not any(x["id"] == s1["id"] for x in get("/api/stock/products"))
+    sm2 = get("/api/stock/summary"); assert not any(l["product"] == "Стяжка кабельная 200" for l in sm2["low"])
 print("STOCK OK")
