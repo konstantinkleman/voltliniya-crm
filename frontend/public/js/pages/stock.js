@@ -5,6 +5,10 @@ import { esc, fmt, num, dateRu, toast, openDrawer, closeDrawer, openModal, close
 let S, D, whs = [], cats = [], prods = [], whSel = null, catSel = null, query = '';
 // сортировка списка позиций: name | cost (себестоимость за ед.) | value (стоимость остатка); dir 1/-1
 let sortKey = 'name', sortDir = 1;
+// раскрытые категории в таблице склада (запоминаются в браузере)
+let openCats = new Set();
+try { openCats = new Set(JSON.parse(localStorage.getItem('stock.open') || '[]')); } catch {}
+const saveOpen = () => { try { localStorage.setItem('stock.open', JSON.stringify([...openCats])); } catch {} };
 try { const sv = JSON.parse(localStorage.getItem('stock.sort') || 'null'); if (sv) { sortKey = sv.k; sortDir = sv.d; } } catch {}
 export function sortProducts(list, whId, key = sortKey, dir = sortDir) {
   const cost = (p) => Number((whId ? p.stock[whId] : null)?.avg_cost || (whId ? 0 : (Number(p.total_qty) ? Number(p.total_value) / Number(p.total_qty) : 0)));
@@ -28,7 +32,6 @@ export async function render(main, r, state) {
   const wh = whs.find(w => w.id === whSel);
   const total = whs.reduce((a, w) => a + Number(w.value), 0);
   const list = prods.filter(p => (!catSel || catSubtree(catSel).has(p.category_id)) && (!query || p.name.toLowerCase().includes(query.toLowerCase())));
-  const inStock = list.filter(p => Number(p.total_qty) > 0), noStock = list.filter(p => Number(p.total_qty) <= 0);
 
   main.innerHTML = `<div class="head"><div><h1>Склад</h1><p>У каждого прораба свой склад; приход проводит директор. Остатки считаются проводками</p></div>
     <div class="row"><button class="btn" data-cats>Категории</button><button class="btn" data-newprod>Новая позиция</button><button class="btn" data-adjust>Инвентаризация</button><button class="btn" data-archived title="Удалённые позиции">Удалённые</button><button class="btn" data-transfer>Переместить</button><button class="btn p" data-receipt>Приход</button></div></div>
@@ -43,15 +46,13 @@ export async function render(main, r, state) {
     <button class="${!catSel ? 'on' : ''}" data-cat="">Все позиции<span class="c">${prods.length}</span></button>
     ${renderTree(null, 0)}
     <button class="l1" style="color:var(--act)" data-newcat>+ категория</button></div>
-   <div class="card wrap">${list.length ? `<table><tr>${sortTh('Позиция', 'name')}<th class="r">Остаток</th>${sortTh('Себест.', 'cost', 'r')}<th class="r">Клиенту</th>${sortTh('Стоимость', 'value', 'r')}<th></th></tr>
-    ${[...sortProducts(inStock, whSel), ...sortProducts(noStock, whSel)].map(p => { const st = whSel ? (p.stock[whSel] || {}) : null; const qty = st ? Number(st.qty || 0) : Number(p.total_qty); const low = p.min_qty && qty < Number(p.min_qty);
-      return `<tr class="${low ? 'low' : ''} ${qty <= 0 ? 'mute' : ''}"><td><a href="#" data-prod="${p.id}"><b>${esc(p.name)}</b></a><div class="small mute">${esc(p.category_path || 'без категории')}${p.sku ? ' · ' + esc(p.sku) : ''}${low ? ' · <span class="warn">ниже минимума ' + num(p.min_qty) + '</span>' : ''}</div></td>
-        <td class="r num">${num(qty, 3)} ${esc(p.unit)}${p.pack_qty && qty > 0 ? `<div class="small mute">${num(qty / Number(p.pack_qty), 1)} ${esc(p.pack_name || 'уп.')}</div>` : ''}</td>
-        <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn" title="Цена клиенту не задана — откройте позицию и укажите">—</span>'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td>
-        <td class="r">${qty > 0 && whSel ? `<button class="btn s" data-issue="${p.id}">Списать</button>` : ''}</td></tr>`; }).join('')}</table>`
+   <div class="card wrap">${list.length ? `<div class="row sp" style="padding:8px 12px 0"><span class="small mute">Нажмите на категорию, чтобы раскрыть</span><button class="btn s" data-expand>Раскрыть / свернуть всё</button></div><table><tr>${sortTh('Позиция', 'name')}<th class="r">Остаток</th>${sortTh('Себест.', 'cost', 'r')}<th class="r">Клиенту</th>${sortTh('Стоимость', 'value', 'r')}<th></th></tr>
+    ${stockTreeRows(list)}</table>`
     : emptyState(prods.length ? 'Ничего не найдено' : 'Номенклатуры пока нет', prods.length ? 'Измените фильтр или поиск.' : 'Нажмите «Приход» — позиции можно создать прямо в накладной, или «Новая позиция».')}</div></div>`;
 
   main.querySelectorAll('[data-wh]').forEach(b => b.onclick = () => { whSel = Number(b.dataset.wh); render(main, r, S); });
+  main.querySelectorAll('tr[data-tcat]').forEach(tr => tr.onclick = () => { const k = tr.dataset.tcat; openCats.has(k) ? openCats.delete(k) : openCats.add(k); saveOpen(); render(main, r, S); });
+  main.querySelector('[data-expand]')?.addEventListener('click', () => { const all = ['none', ...cats.map(c => String(c.id))]; const allOpen = all.every(k => openCats.has(k)); openCats = allOpen ? new Set() : new Set(all); saveOpen(); render(main, r, S); });
   main.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const k = th.dataset.sort; sortDir = sortKey === k ? -sortDir : (k === 'name' ? 1 : -1); sortKey = k; try { localStorage.setItem('stock.sort', JSON.stringify({ k: sortKey, d: sortDir })); } catch {} render(main, r, S); });
   main.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { catSel = b.dataset.cat ? Number(b.dataset.cat) : null; render(main, r, S); });
   main.querySelector('[data-q]').oninput = (e) => { query = e.target.value; clearTimeout(main._t); main._t = setTimeout(() => render(main, r, S), 250); };
@@ -66,6 +67,45 @@ export async function render(main, r, state) {
   main.querySelector('[data-pending]')?.addEventListener('click', (e) => { e.preventDefault(); pendingDrawer(main, r); });
   main.querySelectorAll('[data-prod]').forEach(a => a.onclick = (e) => { e.preventDefault(); prodDrawer(main, r, Number(a.dataset.prod)); });
   main.querySelectorAll('[data-issue]').forEach(b => b.onclick = () => issueModal(main, r, Number(b.dataset.issue)));
+}
+
+// ---------- таблица склада деревом: категория → подкатегории → позиции ----------
+function prodRow(p, depth) {
+  const st = whSel ? (p.stock[whSel] || {}) : null; const qty = st ? Number(st.qty || 0) : Number(p.total_qty); const low = p.min_qty && qty < Number(p.min_qty);
+  return `<tr class="${low ? 'low' : ''} ${qty <= 0 ? 'mute' : ''}"><td style="padding-left:${12 + depth * 18}px"><a href="#" data-prod="${p.id}"><b>${esc(p.name)}</b></a><div class="small mute">${query ? esc(p.category_path || 'без категории') + ' · ' : ''}${p.sku ? esc(p.sku) : ''}${low ? ' · <span class="warn">ниже минимума ' + num(p.min_qty) + '</span>' : ''}</div></td>
+    <td class="r num">${num(qty, 3)} ${esc(p.unit)}${p.pack_qty && qty > 0 ? `<div class="small mute">${num(qty / Number(p.pack_qty), 1)} ${esc(p.pack_name || 'уп.')}</div>` : ''}</td>
+    <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn" title="Цена клиенту не задана — откройте позицию и укажите">—</span>'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td>
+    <td class="r">${qty > 0 && whSel ? `<button class="btn s" data-issue="${p.id}">Списать</button>` : ''}</td></tr>`;
+}
+function stockTreeRows(list) {
+  const qtyOf = (p) => whSel ? Number(p.stock[whSel]?.qty || 0) : Number(p.total_qty);
+  const valOf = (p) => whSel ? Number(p.stock[whSel]?.value || 0) : Number(p.total_value || 0);
+  const sorted = (ps) => [...sortProducts(ps.filter(p => qtyOf(p) > 0), whSel), ...sortProducts(ps.filter(p => qtyOf(p) <= 0), whSel)];
+  const ids = new Set(list.map(p => p.id));
+  const inSub = (cid) => { const sub = catSubtree(cid); return list.filter(p => sub.has(p.category_id)); };
+  const forced = !!query;   // при поиске всё, что найдено, раскрыто
+  const catRow = (key, label, ps, depth) => { const isOpen = forced || openCats.has(key); const inS = ps.filter(p => qtyOf(p) > 0).length;
+    return `<tr class="tcat click" data-tcat="${key}"><td style="padding-left:${12 + depth * 18}px"><b>${isOpen ? '▾' : '▸'} ${esc(label)}</b> <span class="small mute">${ps.length} поз.${inS !== ps.length ? ' · в наличии ' + inS : ''}</span></td><td></td><td></td><td></td><td class="r num"><b>${fmt(ps.reduce((a, p) => a + valOf(p), 0))}</b></td><td></td></tr>`; };
+  const level = (pid, depth) => {
+    let html = '';
+    const children = cats.filter(c => c.parent_id === pid).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    for (const c of children) {
+      const ps = inSub(c.id); if (!ps.length) continue;
+      const key = String(c.id);
+      html += catRow(key, c.name, ps, depth);
+      if (forced || openCats.has(key)) html += level(c.id, depth + 1) + sorted(list.filter(p => p.category_id === c.id)).map(p => prodRow(p, depth + 1)).join('');
+    }
+    return html;
+  };
+  // корень: выбранная слева категория или все; позиции без категории — отдельной группой в конце
+  let html = '';
+  if (catSel) html = level(catSel, 0) + sorted(list.filter(p => p.category_id === catSel)).map(p => prodRow(p, 0)).join('');
+  else {
+    html = level(null, 0);
+    const none = list.filter(p => !p.category_id || !cats.some(c => c.id === p.category_id));
+    if (none.length) { html += catRow('none', 'Без категории', none, 0); if (forced || openCats.has('none')) html += sorted(none).map(p => prodRow(p, 1)).join(''); }
+  }
+  return html;
 }
 
 function renderTree(pid, depth) {

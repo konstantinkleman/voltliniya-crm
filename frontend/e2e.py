@@ -111,6 +111,8 @@ async def main():
         await pg.fill(".modal.open [name=supplier]", "Кабель-Центр")
         await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached"); await pg.wait_for_timeout(600)
         await shot("08a-stock")
+        # склад показан деревом категорий, по умолчанию свёрнут: категория видна, позиции — после раскрытия
+        assert await pg.locator(".wh tr.tcat").count() >= 1; await pg.click(".wh [data-expand]"); await pg.wait_for_timeout(400)
         rows = await pg.locator(".wh table tr").count(); assert rows >= 3, "позиции не появились"
         wt = await pg.locator(".wh").inner_text(); assert "130" in wt, wt   # фиксированная цена клиенту из прихода
         # второй склад (Андрея) и перемещение

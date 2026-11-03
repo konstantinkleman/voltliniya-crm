@@ -50,6 +50,8 @@ async def main():
         await pg.screenshot(path=f"{OUT}/scan-1b.png", full_page=True)
         await pg.click(".modal.open form [type=submit]"); await pg.wait_for_selector(".modal.open", state="detached"); await pg.wait_for_timeout(600)
         await pg.screenshot(path=f"{OUT}/scan-2.png", full_page=True)
+        # склад показан деревом категорий, по умолчанию свёрнут: категория видна, позиции — после раскрытия
+        assert await pg.locator(".wh tr.tcat").count() >= 1; await pg.click(".wh [data-expand]"); await pg.wait_for_timeout(400)
         t = await pg.locator(".wh").inner_text(); assert "Коробка распред. 100×100" in t and "500" in t, t
         assert "Доставка" not in t, "исключённая строка попала в приход"
         prods = await pg.evaluate("fetch('/api/stock/products', {headers:{Authorization:'Bearer '+localStorage.getItem('token')}}).then(r=>r.json())")
