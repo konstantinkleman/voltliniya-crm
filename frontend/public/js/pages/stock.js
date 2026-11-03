@@ -31,7 +31,7 @@ export async function render(main, r, state) {
   const inStock = list.filter(p => Number(p.total_qty) > 0), noStock = list.filter(p => Number(p.total_qty) <= 0);
 
   main.innerHTML = `<div class="head"><div><h1>Склад</h1><p>У каждого прораба свой склад; приход проводит директор. Остатки считаются проводками</p></div>
-    <div class="row"><button class="btn" data-cats>Категории</button><button class="btn" data-newprod>Новая позиция</button><button class="btn" data-adjust>Инвентаризация</button><button class="btn" data-transfer>Переместить</button><button class="btn p" data-receipt>Приход</button></div></div>
+    <div class="row"><button class="btn" data-cats>Категории</button><button class="btn" data-newprod>Новая позиция</button><button class="btn" data-adjust>Инвентаризация</button><button class="btn" data-archived title="Удалённые позиции">Удалённые</button><button class="btn" data-transfer>Переместить</button><button class="btn p" data-receipt>Приход</button></div></div>
   <div class="row sp" style="margin-bottom:14px"><div class="seg">${whs.map(w => `<button class="${w.id === whSel ? 'on' : ''}" data-wh="${w.id}">${esc(w.name)}${w.pending_in ? ` <span class="tag warn">в пути ${w.pending_in}</span>` : ''}</button>`).join('')}<button data-newwh title="Новый склад">+</button></div>
     <input class="btn" data-q placeholder="Поиск по названию" value="${esc(query)}" style="min-width:220px"></div>
   ${wh ? `<div class="grid g4" style="margin-bottom:14px">
@@ -62,6 +62,7 @@ export async function render(main, r, state) {
   main.querySelector('[data-receipt]').onclick = () => receiptModal(main, r);
   main.querySelector('[data-transfer]').onclick = () => transferModal(main, r);
   main.querySelector('[data-adjust]').onclick = () => adjustModal(main, r);
+  main.querySelector('[data-archived]').onclick = () => archivedDrawer(main, r);
   main.querySelector('[data-pending]')?.addEventListener('click', (e) => { e.preventDefault(); pendingDrawer(main, r); });
   main.querySelectorAll('[data-prod]').forEach(a => a.onclick = (e) => { e.preventDefault(); prodDrawer(main, r, Number(a.dataset.prod)); });
   main.querySelectorAll('[data-issue]').forEach(b => b.onclick = () => issueModal(main, r, Number(b.dataset.issue)));
@@ -284,6 +285,15 @@ function transferModal(main, r) {
   formModal({ title: 'Переместить на другой склад', intro: 'Получатель подтверждает в своём кабинете; до этого позиция «в пути» и не считается ни у кого.', submit: 'Переместить',
     fields: [{ name: 'to', label: 'Куда', type: 'select', options: others.map(w => ({ value: w.id, label: w.name })) }, { name: 'product_id', label: 'Позиция', type: 'combo', required: true, options: mine.map(p => ({ value: p.id, label: p.name, sub: `${num(p.stock[whSel].qty, 3)} ${p.unit}${p.category_path ? ' · ' + p.category_path : ''}` })) }, { name: 'qty', label: 'Количество', type: 'number', step: '0.001', required: true }, { name: 'note', label: 'Комментарий' }],
     onSubmit: async (v) => { if (!v.product_id) { toast('Выберите позицию', true); return false; } await api.post('/api/stock/transfer', { from_warehouse_id: from.id, to_warehouse_id: Number(v.to), product_id: Number(v.product_id), qty: v.qty, note: v.note }); toast('Отправлено, ждёт подтверждения'); render(main, r, S); } });
+}
+
+// удалённые позиции: в остатках и стоимости склада не участвуют; остаток, если был, виден здесь — можно вернуть позицию
+async function archivedDrawer(main, r) {
+  const all = await api.get('/api/stock/products?include_inactive=true');
+  const arch = all.filter(p => !p.is_active);
+  const d = openDrawer(`<h2>Удалённые позиции</h2><p class="small mute">Не показываются на складе и не входят в его стоимость. Если удалили по ошибке — верните.</p>
+    <table style="margin-top:10px"><tr><th>Позиция</th><th class="r">Остаток</th><th></th></tr>${arch.map(p => `<tr><td>${esc(p.name)}<div class="small mute">${esc(p.category_path || 'без категории')}</div></td><td class="r num">${Number(p.total_qty) > 0 ? num(p.total_qty, 3) + ' ' + esc(p.unit) + `<div class="small mute">${fmt(p.total_value)}</div>` : '—'}</td><td class="r"><button class="btn s" data-restore="${p.id}">Вернуть</button></td></tr>`).join('') || '<tr><td colspan="3" class="mute">Пусто</td></tr>'}</table>`);
+  d.querySelectorAll('[data-restore]').forEach(b => b.onclick = async () => { const p = arch.find(x => x.id === Number(b.dataset.restore)); await api.patch('/api/stock/products/' + p.id, { ...p, is_active: true }); toast('Позиция возвращена'); closeDrawer(); render(main, r, S); });
 }
 
 async function pendingDrawer(main, r) {

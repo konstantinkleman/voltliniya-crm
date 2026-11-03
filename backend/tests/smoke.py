@@ -219,4 +219,11 @@ with c:
     r = c.delete(f"/api/stock/products/{s1['id']}?force=true"); assert r.status_code == 200 and r.json()["archived"], r.text
     assert not any(x["id"] == s1["id"] for x in get("/api/stock/products"))
     sm2 = get("/api/stock/summary"); assert not any(l["product"] == "Стяжка кабельная 200" for l in sm2["low"])
+    # старое «скрытие» (is_active=false без списания): остаток есть, но в стоимость склада не входит
+    hid = post("/api/stock/products", json={"name": "ВВГнг-LS 5х4", "unit": "м", "init_warehouse_id": wh["id"], "init_qty": 100, "init_cost": 220})
+    v1 = float([w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]["value"])
+    c.patch(f"/api/stock/products/{hid['id']}", json={**{k: hid[k] for k in ("name", "unit", "category_id", "sku", "pack_qty", "pack_name", "markup_pct", "client_price", "min_qty", "note")}, "is_active": False})
+    v2 = float([w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]["value"])
+    assert abs((v1 - v2) - 22000) < 0.01, (v1, v2)
+    assert abs(float(get("/api/stock/summary")["total_value"]) - sum(float(w["value"]) for w in get("/api/stock/warehouses"))) < 0.01
 print("STOCK OK")

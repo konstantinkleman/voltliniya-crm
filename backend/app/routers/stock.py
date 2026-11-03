@@ -45,9 +45,11 @@ def _wh_out(db: Session, w: m.Warehouse, bal: dict) -> WarehouseOut:
     o = WarehouseOut.model_validate(w)
     o.foreman_name = w.foreman.name if w.foreman else None
     mine = {k: v for k, v in bal.items() if k[0] == w.id and v[0] > 0}
+    prods = {p.id: p for p in db.scalars(select(m.Product).where(m.Product.id.in_([k[1] for k in mine]))).all()} if mine else {}
+    # удалённые (скрытые) позиции не считаются ни в стоимости, ни в числе позиций склада
+    mine = {k: v for k, v in mine.items() if k[1] in prods and prods[k[1]].is_active}
     o.value = S.q2(sum((q * c for q, c in mine.values()), Decimal(0)))
     o.positions = len(mine)
-    prods = {p.id: p for p in db.scalars(select(m.Product).where(m.Product.id.in_([k[1] for k in mine]))).all()} if mine else {}
     o.low = sum(1 for (wid, pid), (q, _) in mine.items() if prods.get(pid) and prods[pid].min_qty and q < prods[pid].min_qty)
     o.pending_in = db.scalar(select(m.StockMovement).where(m.StockMovement.warehouse_id == w.id, m.StockMovement.confirmed == False).limit(1)) is not None and \
         len(db.scalars(select(m.StockMovement.id).where(m.StockMovement.warehouse_id == w.id, m.StockMovement.confirmed == False)).all())  # noqa: E712
