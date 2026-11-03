@@ -2,6 +2,9 @@ import { api } from '../api.js';
 import { esc, fmt, num, dateRu, dateTimeRu, toast, formModal, confirmModal, emptyState, today } from '../ui.js';
 import { docsBlock, uploadDoc, loadThumbs } from './docs.js';
 import { stockIssueForObject } from './stockissue.js';
+import { sortProducts } from './stock.js';
+
+let fmSort = 'name:1';
 
 let S, D;
 
@@ -92,10 +95,12 @@ async function renderStock(body) {
   if (!wh) { body.innerHTML = emptyState('Склада пока нет', 'Директор заведёт склад и проведёт первый приход.'); return; }
   const [prods, pending] = await Promise.all([api.get('/api/stock/products?warehouse_id=' + wh.id), api.get('/api/stock/movements?warehouse_id=' + wh.id + '&kind=transfer_in')]);
   const inc = pending.filter(m => !m.confirmed);
-  const mine = prods.filter(p => p.stock[wh.id] && Number(p.stock[wh.id].qty) > 0);
-  body.innerHTML = `<div class="small mute" style="margin:0 2px 8px">${esc(wh.name)} · ${mine.length} позиций</div>
+  const [sk, sd] = fmSort.split(':');
+  const mine = sortProducts(prods.filter(p => p.stock[wh.id] && Number(p.stock[wh.id].qty) > 0), wh.id, sk, Number(sd));
+  body.innerHTML = `<div class="row sp" style="margin:0 2px 8px"><span class="small mute">${esc(wh.name)} · ${mine.length} позиций</span><select data-fm-sort class="btn s" style="padding:5px 8px">${[['name:1', 'А → Я'], ['name:-1', 'Я → А'], ['cost:-1', 'Себестоимость ↓'], ['cost:1', 'Себестоимость ↑']].map(([v, l]) => `<option value="${v}" ${fmSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     ${inc.length ? `<div class="pcard" style="border-color:var(--warn)"><b>В пути · ${inc.length}</b>${inc.map(m => `<div class="row sp" style="margin-top:8px"><span>${esc(m.product_name)} · ${num(m.qty, 3)} ${esc(m.unit)}</span><button class="btn s p" data-ok="${m.id}">Получил</button></div>`).join('')}</div>` : ''}
-    ${mine.map(p => { const st = p.stock[wh.id]; const low = p.min_qty && Number(st.qty) < Number(p.min_qty); return `<div class="pcard"><div class="row sp"><b>${esc(p.name)}</b><span class="num">${num(st.qty, 3)} ${esc(p.unit)}</span></div><div class="small mute">${esc(p.category_path || '')}${low ? ' · <span class="warn">мало, надо докупить</span>' : ''}</div></div>`; }).join('') || '<div class="pcard mute">На складе пусто</div>'}
+    ${mine.map(p => { const st = p.stock[wh.id]; const low = p.min_qty && Number(st.qty) < Number(p.min_qty); return `<div class="pcard"><div class="row sp"><b>${esc(p.name)}</b><span class="num">${num(st.qty, 3)} ${esc(p.unit)}</span></div><div class="small mute">${esc(p.category_path || '')}${st.avg_cost ? ' · себест. ' + num(st.avg_cost, 2) + ' ₽' : ''}${low ? ' · <span class="warn">мало, надо докупить</span>' : ''}</div></div>`; }).join('') || '<div class="pcard mute">На складе пусто</div>'}
     <div class="infobox">Списание на объект — из карточки объекта, кнопка «Списать со склада». Приход проводит директор.</div>`;
+  body.querySelector('[data-fm-sort]').onchange = (e) => { fmSort = e.target.value; renderStock(body); };
   body.querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => { await api.post(`/api/stock/movements/${b.dataset.ok}/confirm`, {}); toast('Принято на склад'); renderStock(body); });
 }

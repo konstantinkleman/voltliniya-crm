@@ -72,6 +72,7 @@ h1{font-size:22px}h2{font-size:16px}h3{font-size:14px}
 .combo-it.new{color:var(--act)}
 tr.grp td{background:var(--bg);padding-top:8px;padding-bottom:4px}
 tr.crew-head td{border-top:2px solid var(--line)}
+th.sortable{cursor:pointer;user-select:none}th.sortable:hover{color:var(--ink)}th.sortable.on{color:var(--act)}
 .fields2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:3px}
 .seg button{border:0;background:none;padding:6px 12px;border-radius:6px;font-weight:600;color:var(--ink2)}

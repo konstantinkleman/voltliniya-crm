@@ -3,6 +3,16 @@ import { stockIssueModal } from './stockissue.js';
 import { esc, fmt, num, dateRu, toast, openDrawer, closeDrawer, openModal, closeModal, formModal, confirmModal, emptyState, today, comboHtml, mountCombo } from '../ui.js';
 
 let S, D, whs = [], cats = [], prods = [], whSel = null, catSel = null, query = '';
+// сортировка списка позиций: name | cost (себестоимость за ед.) | value (стоимость остатка); dir 1/-1
+let sortKey = 'name', sortDir = 1;
+try { const sv = JSON.parse(localStorage.getItem('stock.sort') || 'null'); if (sv) { sortKey = sv.k; sortDir = sv.d; } } catch {}
+export function sortProducts(list, whId, key = sortKey, dir = sortDir) {
+  const cost = (p) => Number((whId ? p.stock[whId] : null)?.avg_cost || (whId ? 0 : (Number(p.total_qty) ? Number(p.total_value) / Number(p.total_qty) : 0)));
+  const value = (p) => whId ? Number(p.stock[whId]?.value || 0) : Number(p.total_value || 0);
+  const f = key === 'cost' ? cost : key === 'value' ? value : null;
+  return [...list].sort((a, b) => f ? (f(a) - f(b)) * dir || a.name.localeCompare(b.name, 'ru') : a.name.localeCompare(b.name, 'ru') * dir);
+}
+export const sortTh = (label, key, cls = '') => `<th class="${cls} sortable ${sortKey === key ? 'on' : ''}" data-sort="${key}" title="Сортировать">${label}${sortKey === key ? (sortDir === 1 ? ' ↑' : ' ↓') : ''}</th>`;
 
 const catName = (id) => (cats.find(c => c.id === id) || {}).name || '';
 const catChildren = (pid) => cats.filter(c => c.parent_id === pid);
@@ -33,8 +43,8 @@ export async function render(main, r, state) {
     <button class="${!catSel ? 'on' : ''}" data-cat="">Все позиции<span class="c">${prods.length}</span></button>
     ${renderTree(null, 0)}
     <button class="l1" style="color:var(--act)" data-newcat>+ категория</button></div>
-   <div class="card wrap">${list.length ? `<table><tr><th>Позиция</th><th class="r">Остаток</th><th class="r">Себест.</th><th class="r">Клиенту</th><th class="r">Стоимость</th><th></th></tr>
-    ${[...inStock, ...noStock].map(p => { const st = whSel ? (p.stock[whSel] || {}) : null; const qty = st ? Number(st.qty || 0) : Number(p.total_qty); const low = p.min_qty && qty < Number(p.min_qty);
+   <div class="card wrap">${list.length ? `<table><tr>${sortTh('Позиция', 'name')}<th class="r">Остаток</th>${sortTh('Себест.', 'cost', 'r')}<th class="r">Клиенту</th>${sortTh('Стоимость', 'value', 'r')}<th></th></tr>
+    ${[...sortProducts(inStock, whSel), ...sortProducts(noStock, whSel)].map(p => { const st = whSel ? (p.stock[whSel] || {}) : null; const qty = st ? Number(st.qty || 0) : Number(p.total_qty); const low = p.min_qty && qty < Number(p.min_qty);
       return `<tr class="${low ? 'low' : ''} ${qty <= 0 ? 'mute' : ''}"><td><a href="#" data-prod="${p.id}"><b>${esc(p.name)}</b></a><div class="small mute">${esc(p.category_path || 'без категории')}${p.sku ? ' · ' + esc(p.sku) : ''}${low ? ' · <span class="warn">ниже минимума ' + num(p.min_qty) + '</span>' : ''}</div></td>
         <td class="r num">${num(qty, 3)} ${esc(p.unit)}${p.pack_qty && qty > 0 ? `<div class="small mute">${num(qty / Number(p.pack_qty), 1)} ${esc(p.pack_name || 'уп.')}</div>` : ''}</td>
         <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn" title="Цена клиенту не задана — откройте позицию и укажите">—</span>'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td>
@@ -42,6 +52,7 @@ export async function render(main, r, state) {
     : emptyState(prods.length ? 'Ничего не найдено' : 'Номенклатуры пока нет', prods.length ? 'Измените фильтр или поиск.' : 'Нажмите «Приход» — позиции можно создать прямо в накладной, или «Новая позиция».')}</div></div>`;
 
   main.querySelectorAll('[data-wh]').forEach(b => b.onclick = () => { whSel = Number(b.dataset.wh); render(main, r, S); });
+  main.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const k = th.dataset.sort; sortDir = sortKey === k ? -sortDir : (k === 'name' ? 1 : -1); sortKey = k; try { localStorage.setItem('stock.sort', JSON.stringify({ k: sortKey, d: sortDir })); } catch {} render(main, r, S); });
   main.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { catSel = b.dataset.cat ? Number(b.dataset.cat) : null; render(main, r, S); });
   main.querySelector('[data-q]').oninput = (e) => { query = e.target.value; clearTimeout(main._t); main._t = setTimeout(() => render(main, r, S), 250); };
   main.querySelector('[data-newwh]').onclick = () => newWarehouse(main, r);
@@ -283,17 +294,29 @@ async function pendingDrawer(main, r) {
 }
 
 function adjustModal(main, r) {
-  // все активные позиции: сначала те, что есть на складе, потом с нулевым учётом — чтобы поставить на учёт то, что завели без количества
+  // позиции сгруппированы по категориям; категория раскрывается кликом. Поиск раскрывает совпадения.
   const qty = (p) => Number(p.stock[whSel]?.qty || 0);
-  const mine = [...prods].sort((a, b) => (qty(b) > 0) - (qty(a) > 0) || a.name.localeCompare(b.name, 'ru'));
+  const mine = sortProducts(prods, whSel, 'name', 1);
   if (!mine.length) return toast('Нет позиций', true);
-  const m = openModal(`<h2>Инвентаризация · ${esc(whs.find(w => w.id === whSel)?.name)}</h2><p class="small mute" style="margin:6px 0 0">Введите фактический остаток там, где он отличается. Разница спишется или добавится отдельной проводкой с датой. Позиции с нулевым учётом — ниже, их тоже можно поставить на учёт.</p><form>
+  const groups = new Map();
+  for (const p of mine) { const k = p.category_path || 'Без категории'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
+  const keys = [...groups.keys()].sort((a, b) => (a === 'Без категории') - (b === 'Без категории') || a.localeCompare(b, 'ru'));
+  const inp = 'width:100px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);text-align:right';
+  const m = openModal(`<h2>Инвентаризация · ${esc(whs.find(w => w.id === whSel)?.name)}</h2><p class="small mute" style="margin:6px 0 0">Откройте категорию, введите фактический остаток там, где он отличается от учёта. Разница спишется или добавится отдельной проводкой. Позиции с нулевым учётом тоже здесь — их можно поставить на учёт.</p><form>
     <input data-inv-q placeholder="Поиск по названию" style="margin-top:10px;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)">
-    <table style="margin-top:10px"><tr><th>Позиция</th><th class="r">Учёт</th><th class="r">Факт</th></tr>${mine.map(p => `<tr data-inv="${esc(p.name.toLowerCase())}" class="${qty(p) > 0 ? '' : 'mute'}"><td>${esc(p.name)}<div class="small mute">${esc(p.category_path || '')}</div></td><td class="r num">${num(qty(p), 3)} ${esc(p.unit)}</td><td class="r"><input name="a${p.id}" type="number" step="0.001" inputmode="decimal" placeholder="${num(qty(p), 3)}" style="width:100px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);text-align:right"></td></tr>`).join('')}</table>
+    <table style="margin-top:10px"><tr><th>Позиция</th><th class="r">Учёт</th><th class="r">Факт</th></tr>
+    ${keys.map((k, gi) => { const ps = groups.get(k); const withQty = ps.filter(p => qty(p) > 0).length; return `<tr class="grp click" data-grp="${gi}"><td colspan="3"><b>▸ ${esc(k)}</b> <span class="small mute">${ps.length} поз.${withQty ? ' · с остатком ' + withQty : ''}</span></td></tr>
+      ${ps.map(p => `<tr data-inv="${esc(p.name.toLowerCase())}" data-of="${gi}" class="hidden ${qty(p) > 0 ? '' : 'mute'}"><td style="padding-left:24px">${esc(p.name)}</td><td class="r num">${num(qty(p), 3)} ${esc(p.unit)}</td><td class="r"><input name="a${p.id}" type="number" step="0.001" inputmode="decimal" placeholder="${num(qty(p), 3)}" style="${inp}"></td></tr>`).join('')}`; }).join('')}</table>
     <div class="field"><label>Комментарий</label><input name="note"></div><div class="actions"><button type="button" class="btn" data-cancel>Отмена</button><button type="submit" class="btn p">Провести</button></div></form>`);
+  const open = new Set();
+  const apply = () => { const q = m.querySelector('[data-inv-q]').value.trim().toLowerCase();
+    m.querySelectorAll('tr[data-inv]').forEach(tr => tr.classList.toggle('hidden', q ? !tr.dataset.inv.includes(q) : !open.has(tr.dataset.of)));
+    m.querySelectorAll('tr[data-grp]').forEach(tr => { const gi = tr.dataset.grp; const anyVisible = q ? [...m.querySelectorAll(`tr[data-of="${gi}"]`)].some(x => !x.classList.contains('hidden')) : true; tr.classList.toggle('hidden', !anyVisible); tr.querySelector('b').textContent = (q || open.has(gi) ? '▾ ' : '▸ ') + tr.querySelector('b').textContent.slice(2); }); };
+  m.querySelectorAll('tr[data-grp]').forEach(tr => tr.onclick = () => { const gi = tr.dataset.grp; open.has(gi) ? open.delete(gi) : open.add(gi); apply(); });
+  if (keys.length === 1) { open.add('0'); apply(); }
   m.querySelector('.box').style.width = 'min(640px,100%)';
   m.querySelector('[data-cancel]').onclick = closeModal;
-  m.querySelector('[data-inv-q]').oninput = (e) => { const q = e.target.value.trim().toLowerCase(); m.querySelectorAll('tr[data-inv]').forEach(tr => tr.classList.toggle('hidden', !!q && !tr.dataset.inv.includes(q))); };
+  m.querySelector('[data-inv-q]').oninput = apply;
   m.querySelector('form').onsubmit = async (e) => { e.preventDefault(); const f = e.target; const lines = [];
     for (const p of mine) { const v = f[`a${p.id}`].value; if (v !== '') lines.push({ product_id: p.id, actual_qty: Number(v) }); }
     if (!lines.length) return toast('Ничего не изменено', true);
