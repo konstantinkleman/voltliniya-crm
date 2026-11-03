@@ -21,7 +21,7 @@ async def main():
         await pg.reload(); await pg.wait_for_selector("[data-receipt]"); await pg.wait_for_timeout(300)
         await pg.click("[data-receipt]"); await pg.wait_for_selector(".modal.open [data-scan]", state="attached")
         png = f"{OUT}/nakl.png"; open(png, "wb").write(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="))
-        await pg.locator(".modal.open [data-scan]").set_input_files(png)
+        await pg.locator(".modal.open [data-scan]").nth(1).set_input_files(png)   # кнопка «Файл с устройства»
         await pg.wait_for_function("document.querySelector('[data-scan-status]').textContent.includes('Распознано')", timeout=15000)
         await pg.wait_for_timeout(300); await pg.screenshot(path=f"{OUT}/scan-1.png", full_page=True)
         f = pg.locator(".modal.open form")

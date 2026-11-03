@@ -133,7 +133,7 @@ function receiptModal(main, r) {
     <td><input name="c${i}" type="number" step="0.01" inputmode="decimal" placeholder="закупка" style="width:90px;${inp}"></td>
     <td><input name="s${i}" type="number" step="0.01" inputmode="decimal" placeholder="клиенту" style="width:90px;${inp}"><div name="mk${i}" class="small mute num" style="margin-top:2px;min-height:14px"></div></td>
     <td style="padding-left:0"><button type="button" class="btn s" data-skip="${i}" title="Не заносить эту строку в приход" style="padding:4px 8px">×</button></td></tr>`;
-  const m = openModal(`<div class="row sp"><h2>Приход на ${esc(wh?.name || 'склад')}</h2>${D.invoice_ai ? `<label class="btn s p" style="cursor:pointer">📷 По фото накладной<input type="file" accept="image/*,application/pdf" capture="environment" data-scan class="hidden"></label>` : ''}</div>
+  const m = openModal(`<div class="row sp"><h2>Приход на ${esc(wh?.name || 'склад')}</h2>${D.invoice_ai ? `<div class="row" style="gap:6px"><label class="btn s p" style="cursor:pointer" title="Снять накладную камерой">📷 Сфотографировать<input type="file" accept="image/*" capture="environment" data-scan class="hidden"></label><label class="btn s" style="cursor:pointer" title="Фото или PDF накладной с устройства">📎 Файл с устройства<input type="file" accept="image/*,.heic,.heif,application/pdf" data-scan class="hidden"></label></div>` : ''}</div>
     <div class="small mute" data-scan-status style="margin-top:4px"></div><form>
     <div class="fields2"><div class="field"><label>Склад</label><select name="warehouse_id">${whs.map(w => `<option value="${w.id}" ${w.id === whSel ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div><div class="field"><label>Дата</label><input name="date" type="date" value="${today()}"></div></div>
     <div class="fields2"><div class="field"><label>Поставщик</label><input name="supplier" placeholder="Кабель-Центр"></div><div class="field"><label>№ накладной</label><input name="doc_number"></div></div>
@@ -176,8 +176,8 @@ function receiptModal(main, r) {
   // три стартовые строки уже в разметке
   for (let i = 0; i < 3; i++) { mountLine(i); n = i + 1; }
   m.querySelector('[data-more]').onclick = () => addLine();
-  const scan = m.querySelector('[data-scan]');
-  if (scan) scan.onchange = async () => {
+  // две кнопки — камера и файл с устройства — один обработчик
+  m.querySelectorAll('[data-scan]').forEach(scan => scan.onchange = async () => {
     const file = scan.files[0]; if (!file) return;
     const status = m.querySelector('[data-scan-status]');
     status.textContent = 'Распознаю накладную… обычно 10–30 секунд'; scan.disabled = true;
@@ -215,7 +215,7 @@ function receiptModal(main, r) {
       status.textContent = res.lines.length ? `Распознано строк: ${res.lines.length}, сопоставлено: ${matched}${lows ? `, сомнительных: ${lows} (подсвечены)` : ''}. Проверьте количество, цены и категории; лишние строки исключите крестиком.` : 'Строки не распознаны — попробуйте более чёткое фото или введите вручную.';
     } catch (err) { status.textContent = ''; toast(err.message, true); }
     finally { scan.disabled = false; scan.value = ''; }
-  };
+  });
   m.querySelector('[data-cancel]').onclick = closeModal;
   f.onsubmit = async (e) => {
     e.preventDefault(); const lines = [];
