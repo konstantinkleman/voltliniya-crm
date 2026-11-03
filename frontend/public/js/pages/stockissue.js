@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { esc, num, toast, openModal, closeModal, today, comboHtml, mountCombo } from '../ui.js';
+import { esc, num, fmt, toast, openModal, closeModal, today, comboHtml, mountCombo } from '../ui.js';
 
 // Списание со склада на объект (и возврат) — несколько позиций одним документом.
 // Открывается из карточки объекта, кабинета прораба и из карточки позиции на складе.
@@ -22,7 +22,8 @@ export async function stockIssueModal({ warehouse: wh, object = null, objects = 
   const opts = list.map(p => ({ value: p.id, label: p.name, sub: `${num(avail[p.id], 3)} ${p.unit}${p.category_path ? ' · ' + p.category_path : ''}` }));
   const inp = 'padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
   const line = (i) => `<tr data-line="${i}"><td>${comboHtml(`p${i}`, { placeholder: '— выбрать позицию —' })}<div name="av${i}" class="small mute" style="margin-top:3px;min-height:14px"></div></td>
-    <td><input name="q${i}" type="number" step="0.001" inputmode="decimal" placeholder="кол-во" style="width:96px;${inp}"></td>
+    <td style="white-space:nowrap"><input name="q${i}" type="number" step="any" inputmode="decimal" placeholder="кол-во" style="width:90px;${inp}"> <select name="u${i}" class="hidden" style="${inp};padding:6px 4px"></select><span name="ul${i}" class="small mute"></span>
+      <div name="cost${i}" class="small mute num" style="margin-top:3px;min-height:14px"></div></td>
     <td style="padding-left:0"><button type="button" class="btn s" data-rm="${i}" title="Убрать строку" style="padding:4px 8px">×</button></td></tr>`;
   const title = returnMode ? 'Вернуть на склад' : 'Списать со склада';
   const m = openModal(`<h2>${title}</h2><p class="small mute" style="margin:6px 0 0">${esc(wh.name)} ${returnMode ? '←' : '→'} ${object ? esc(object.client_name) : 'объект'}${returnMode ? '' : ' · себестоимость уйдёт в объект по средней цене склада'}</p><form>
@@ -38,8 +39,19 @@ export async function stockIssueModal({ warehouse: wh, object = null, objects = 
   const addLine = (pid = null) => {
     const i = n++;
     m.querySelector('#is-lines').insertAdjacentHTML('beforeend', line(i));
-    const av = m.querySelector(`[name=av${i}]`), q = f[`q${i}`];
-    const show = (v) => { const p = byId[v]; av.textContent = p ? `${returnMode ? 'на объекте' : 'на складе'} ${num(avail[p.id], 3)} ${p.unit}` : ''; q.placeholder = p ? p.unit : 'кол-во'; };
+    const av = m.querySelector(`[name=av${i}]`), q = f[`q${i}`], us = f[`u${i}`], ul = m.querySelector(`[name=ul${i}]`), cost = m.querySelector(`[name=cost${i}]`);
+    // единица всегда видна рядом с количеством; если у позиции задана упаковка — можно вводить упаковками
+    const show = (v) => { const p = byId[v];
+      av.textContent = p ? `${returnMode ? 'на объекте' : 'на складе'} ${num(avail[p.id], 3)} ${p.unit}${p.pack_qty ? ` (${num(avail[p.id] / Number(p.pack_qty), 2)} ${p.pack_name || 'уп.'})` : ''}` : '';
+      if (p && p.pack_qty) { us.innerHTML = `<option value="1">${esc(p.unit)}</option><option value="${Number(p.pack_qty)}">${esc(p.pack_name || 'уп.')} (${num(p.pack_qty)} ${esc(p.unit)})</option>`; us.classList.remove('hidden'); ul.textContent = ''; }
+      else { us.classList.add('hidden'); us.innerHTML = '<option value="1"></option>'; ul.textContent = p ? p.unit : ''; }
+      calc(); };
+    // предпросмотр: сколько это в единицах учёта и на какую сумму уйдёт в объект
+    const calc = () => { const p = byId[f[`p${i}`]?.value]; const x = Number(q.value) * Number(us.value || 1);
+      if (!p || !x) { cost.textContent = ''; return; }
+      const avg = Number(p.stock[wh.id]?.avg_cost || 0);
+      cost.textContent = (Number(us.value) > 1 ? `= ${num(x, 3)} ${p.unit}` : '') + (avg ? `${Number(us.value) > 1 ? ' · ' : ''}≈ ${fmt(x * avg)} (${num(avg, 2)} ₽/${p.unit})` : ''); };
+    q.oninput = calc; us.onchange = calc;
     mountCombo(m.querySelector(`[data-combo="p${i}"]`), { options: opts, value: pid || '', allowEmpty: false, onChange: (v) => { show(v); if (!q.value) q.focus(); } });
     show(pid || '');
     m.querySelector(`[data-rm="${i}"]`).onclick = () => m.querySelector(`tr[data-line="${i}"]`).remove();
@@ -53,7 +65,7 @@ export async function stockIssueModal({ warehouse: wh, object = null, objects = 
     const lines = [], seen = new Set();
     for (let i = 0; i < n; i++) {
       const sel = f[`p${i}`]; if (!sel) continue;
-      const pid = Number(sel.value), qty = Number(f[`q${i}`].value);
+      const pid = Number(sel.value), qty = Math.round(Number(f[`q${i}`].value) * Number(f[`u${i}`].value || 1) * 1000) / 1000;   // в единицах учёта
       if (!pid && !qty) continue;
       if (!pid) return toast('Выберите позицию в заполненной строке', true);
       if (!qty || qty <= 0) return toast(`Укажите количество: ${byId[pid].name}`, true);
