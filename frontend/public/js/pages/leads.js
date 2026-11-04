@@ -66,6 +66,7 @@ async function openLead(id) {
       <dt>Адрес</dt><dd>${esc(l.address || '—')}</dd>
       <dt>КП</dt><dd>${l.offer_sum ? fmt(l.offer_sum) + (l.tariff ? ' · ' + esc(l.tariff) : '') : '—'}</dd>
       <dt>Заметка</dt><dd>${esc(l.note || '—')}</dd>
+      ${l.utm ? `<dt>Метки</dt><dd class="small mute" style="word-break:break-all">${esc(l.utm)}</dd>` : ''}
     </dl>
     <div class="row">
       ${next ? `<button class="btn p" data-next>${esc(D.lead_stage_names[next])} →</button>` : ''}

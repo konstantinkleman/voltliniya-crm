@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    # приём заявок из внешних каналов (форма сайта, сбор с Профи): секрет в заголовке X-Intake-Token.
+    # Пустой — приём выключен.
+    INTAKE_TOKEN: str = ""
 
 
 settings = Settings()

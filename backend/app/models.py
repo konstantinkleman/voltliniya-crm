@@ -20,6 +20,7 @@ SOURCES = {
     "site_other": "сайт · другое",
     "avito": "Авито",
     "yandex_maps": "Яндекс Карты",
+    "sms": "SMS-рассылка",
     "recommendation": "рекомендация",
     "designer": "дизайнер",
     "renovation": "ремонтная компания",
@@ -49,6 +50,7 @@ EXPENSE_CATEGORIES = {
     "profi": ("профи.ру", "channel", "profi"),
     "avito": ("Авито", "channel", "avito"),
     "yandex_maps": ("Яндекс Карты (продвижение)", "channel", "yandex_maps"),
+    "sms": ("SMS-рассылки операторов", "channel", "sms"),
     "partners": ("Выплаты партнёрам (дизайнеры, ремонтники)", "channel", "designer"),
     "hosting": ("Сервер и хостинг", "marketing", None),
     "domain": ("Домен и сайт", "marketing", None),
@@ -136,6 +138,10 @@ class Lead(Base, TimestampMixin):
     note: Mapped[str | None] = mapped_column(Text)
     won_at: Mapped[Date | None] = mapped_column(Date)
     object_id: Mapped[int | None] = mapped_column(ForeignKey("objects.id"))
+    # автоматический приём: id заявки во внешней системе (чат Профи, Авито) — чтобы не создавать дубли
+    external_ref: Mapped[str | None] = mapped_column(String(120), index=True)
+    # UTM-метки и страница, с которой пришла заявка с сайта
+    utm: Mapped[str | None] = mapped_column(String(500))
 
     activities: Mapped[list["LeadActivity"]] = relationship(back_populates="lead", order_by="LeadActivity.id.desc()", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="lead", foreign_keys="Document.lead_id")

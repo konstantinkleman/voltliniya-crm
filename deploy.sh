@@ -77,6 +77,20 @@ fi
 # 2b. Новые переменные в существующем .env (без перезаписи значений).
 grep -q '^OPENAI_API_KEY=' .env || printf '\n# Распознавание накладных по фото: вставьте ключ OpenAI и перезапустите deploy.sh\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-4o\n' >> .env
 
+# 2b'. Токен приёма заявок из внешних каналов (форма сайта, Профи). Создаётся один раз.
+if ! grep -q '^INTAKE_TOKEN=.\+' .env; then
+  sed -i '/^INTAKE_TOKEN=/d' .env
+  TOK=$(head -c 64 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 40 || true)
+  printf '\n# Приём заявок с сайта и других каналов (заголовок X-Intake-Token)\nINTAKE_TOKEN=%s\n' "$TOK" >> .env
+  echo
+  echo "=============================================="
+  echo " Создан токен приёма заявок (нужен обработчику формы сайта):"
+  echo "   $TOK"
+  echo " Он хранится в $DIR/.env (строка INTAKE_TOKEN)."
+  echo "=============================================="
+  echo
+fi
+
 # 2c. Версия сборки = хеш коммита: по ней открытые вкладки CRM понимают, что надо перезагрузиться.
 sed -i '/^APP_VERSION=/d' .env
 echo "APP_VERSION=$(git rev-parse --short HEAD 2>/dev/null || date +%s)" >> .env

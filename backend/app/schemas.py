@@ -167,6 +167,8 @@ class LeadOut(ORM):
     object_id: int | None
     created_at: datetime
     updated_at: datetime
+    external_ref: str | None = None
+    utm: str | None = None
 
 
 class LeadDetail(LeadOut):
