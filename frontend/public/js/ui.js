@@ -1,6 +1,8 @@
 // Утилиты разметки и общие элементы: тосты, модалки, ящик, форматирование.
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// текст с переносами строк и кликабельными ссылками (заявки с сайта: ответы формы, ссылки на файлы проекта)
+export const richText = (t) => esc(t ?? '').replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u.length > 60 ? u.slice(0, 57) + '…' : u}</a>`).replace(/\n/g, '<br>');
 export const html = (strings, ...vals) => strings.reduce((a, s, i) => a + s + (i < vals.length ? (vals[i] instanceof Raw ? vals[i].s : Array.isArray(vals[i]) ? vals[i].map(v => v instanceof Raw ? v.s : esc(v)).join('') : esc(vals[i])) : ''), '');
 class Raw { constructor(s) { this.s = s; } }
 export const raw = (s) => new Raw(s);
@@ -15,7 +17,7 @@ export const today = () => new Date().toISOString().slice(0, 10);
 export const monthKey = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 export const monthName = (key) => { const [y, m] = key.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }); };
 
-export const srcClass = (s) => ({ profi: 'profi', site_direct: 'site', site_seo: 'site', site_other: 'site', avito: 'avito', recommendation: 'rec', designer: 'rec', renovation: 'rec' }[s] || '');
+export const srcClass = (s) => ({ profi: 'profi', site_direct: 'site', site_rsya: 'site', site_seo: 'site', site_other: 'site', avito: 'avito', recommendation: 'rec', designer: 'rec', renovation: 'rec' }[s] || '');
 
 export function toast(msg, isErr = false) {
   const e = document.getElementById('toast');

@@ -38,6 +38,17 @@ UTM_SOURCES = [
     (("profi",), "profi"),
 ]
 SEARCH_REFERRERS = ("yandex.", "ya.ru", "google.", "go.mail.ru", "bing.com", "duckduckgo.")
+# РСЯ (рекламная сеть Яндекса) отличается от поиска не utm_source, а типом площадки: подстановка Директа
+# {source_type} = context (РСЯ) / search (поиск). Плюс страхуемся по utm_medium/utm_campaign, если метки ставили вручную.
+RSYA_MARKS = ("context", "rsya", "rsy", "рся", "network", "display", "cpm")
+
+
+def is_rsya(data) -> bool:
+    st = (getattr(data, "source_type", None) or "").lower()
+    if st:
+        return st == "context"
+    hay = " ".join((getattr(data, k, None) or "") for k in ("utm_medium", "utm_campaign", "utm_content")).lower()
+    return any(m in hay for m in RSYA_MARKS)
 
 
 class IntakeLead(BaseModel):
@@ -54,6 +65,7 @@ class IntakeLead(BaseModel):
     utm_campaign: str | None = None
     utm_content: str | None = None
     utm_term: str | None = None
+    source_type: str | None = None      # подстановка Директа {source_type}: search — поиск, context — РСЯ
     yclid: str | None = None            # метка клика Директа
     page: str | None = None             # страница сайта, где отправлена форма
     referrer: str | None = None
@@ -90,10 +102,10 @@ def resolve_source(data: IntakeLead) -> str:
     if us:
         for keys, src in UTM_SOURCES:
             if any(k in us for k in keys):
-                return src
+                return "site_rsya" if src == "site_direct" and is_rsya(data) else src
         return "site_other"
     if data.yclid:
-        return "site_direct"
+        return "site_rsya" if is_rsya(data) else "site_direct"
     host = urlparse(data.referrer or "").netloc.lower()
     if host and any(r in host for r in SEARCH_REFERRERS):
         return "site_seo"
@@ -103,7 +115,7 @@ def resolve_source(data: IntakeLead) -> str:
 def utm_text(data: IntakeLead) -> str | None:
     parts = [f"{k}={v}" for k, v in (
         ("utm_source", data.utm_source), ("utm_medium", data.utm_medium), ("utm_campaign", data.utm_campaign),
-        ("utm_content", data.utm_content), ("utm_term", data.utm_term), ("yclid", data.yclid),
+        ("utm_content", data.utm_content), ("utm_term", data.utm_term), ("source_type", data.source_type), ("yclid", data.yclid),
         ("page", data.page), ("referrer", data.referrer)) if v]
     return "; ".join(parts)[:500] or None
 
@@ -129,6 +141,7 @@ class SiteLead(BaseModel):
     utm_campaign: str | None = None
     utm_content: str | None = None
     utm_term: str | None = None
+    source_type: str | None = None
     yclid: str | None = None
     page: str | None = None
     referrer: str | None = None
@@ -149,7 +162,8 @@ def intake_site(data: SiteLead, db: Session = Depends(get_db)):
     recent = db.scalars(select(m.Lead).where(m.Lead.created_at >= since, m.Lead.source.like("site%"))).all()
     if len(recent) >= SITE_HOURLY_LIMIT:
         raise HTTPException(429, "Слишком много заявок, попробуйте позже")
-    lead = IntakeLead(**{k: (v[:500] if isinstance(v, str) else v) for k, v in data.model_dump(exclude={"website"}).items()})
+    lead = IntakeLead(**{k: (v[:4000] if k == "message" else v[:500]) if isinstance(v, str) else v
+                         for k, v in data.model_dump(exclude={"website"}).items()})
     res = _intake(lead, db)
     return res
 

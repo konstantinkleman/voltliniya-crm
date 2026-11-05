@@ -15,7 +15,8 @@ Money = Numeric(14, 2)
 
 SOURCES = {
     "profi": "профи.ру",
-    "site_direct": "сайт · Директ",
+    "site_direct": "сайт · Директ поиск",
+    "site_rsya": "сайт · РСЯ",
     "site_seo": "сайт · поиск",
     "site_other": "сайт · другое",
     "avito": "Авито",
@@ -46,7 +47,8 @@ PAY_METHODS = {"transfer": "перевод", "cash": "наличные"}
 # категория расхода -> (название, тип, канал)
 # тип: channel — маркетинг по каналу, marketing — общий маркетинг, staff — персонал, operating — операционные
 EXPENSE_CATEGORIES = {
-    "direct": ("Яндекс Директ", "channel", "site_direct"),
+    "direct": ("Яндекс Директ · поиск", "channel", "site_direct"),
+    "rsya": ("Яндекс Директ · РСЯ", "channel", "site_rsya"),
     "profi": ("профи.ру", "channel", "profi"),
     "avito": ("Авито", "channel", "avito"),
     "yandex_maps": ("Яндекс Карты (продвижение)", "channel", "yandex_maps"),

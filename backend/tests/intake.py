@@ -30,6 +30,12 @@ with c:
     assert intake({"phone": "89000000005"})["source"] == "site_other"
     assert intake({"phone": "89000000006", "utm_source": "telegram"})["source"] == "site_other"
     intake({"phone": "89000000007", "source": "nonsense"}, code=400)
+    # Директ: поиск и РСЯ различаются по {source_type}, иначе — по меткам в medium/campaign
+    assert intake({"phone": "89000000011", "utm_source": "yandex", "source_type": "search"})["source"] == "site_direct"
+    assert intake({"phone": "89000000012", "utm_source": "yandex", "source_type": "context"})["source"] == "site_rsya"
+    assert intake({"phone": "89000000013", "utm_source": "yandex", "utm_medium": "cpc", "utm_campaign": "rsya_moscow"})["source"] == "site_rsya"
+    assert intake({"phone": "89000000014", "yclid": "1", "source_type": "context"})["source"] == "site_rsya"
+    assert intake({"phone": "89000000015", "utm_source": "yandex", "utm_medium": "cpc", "utm_campaign": "poisk"})["source"] == "site_direct"
 
     # повтор по телефону в другом формате — та же заявка, запись в истории
     b = intake({"name": "Ольга", "phone": "8 (900) 000 00 01", "message": "Перезвоните после 18"})
@@ -51,6 +57,7 @@ with c:
     assert lp["phone"] == "+7 900 111-22-33" and float(lp["lead_cost"]) == 650 and lp["external_ref"] == "chat-42"
     assert len([l for l in c.get("/api/leads").json() if l["source"] == "profi"]) == 1
     assert c.get("/api/dictionaries").json()["sources"]["sms"] == "SMS-рассылка"
+    assert c.get("/api/dictionaries").json()["sources"]["site_rsya"] == "сайт · РСЯ"
     assert c.get("/api/stats/summary").status_code in (200, 404)
 
 # --- форма сайта: без токена, только поля формы ---
@@ -62,6 +69,7 @@ with c:
         return r.json()
     s1 = site({"name": "Сергей", "phone": "+7 (916) 555-12-34", "message": "Квартира 62 м²", "area_m2": 62.5, "utm_source": "yandex", "utm_campaign": "poisk_msk", "page": "/"})
     assert s1["created"] and s1["source"] == "site_direct", s1
+    assert site({"phone": "+7 916 555-00-01", "utm_source": "yandex", "source_type": "context"})["source"] == "site_rsya"
     assert site({"phone": "89165551234", "message": "ещё кондиционеры"})["duplicate"] == "phone"
     site({"phone": "+79990000000", "website": "http://spam"}, code=400)          # бот
     site({"phone": "123"}, code=400)                                           # не телефон

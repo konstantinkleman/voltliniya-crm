@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { crewField, bindCrewFilter, esc, fmt, num, dateRu, dateTimeRu, srcClass, toast, openDrawer, closeDrawer, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
+import { richText, crewField, bindCrewFilter, esc, fmt, num, dateRu, dateTimeRu, srcClass, toast, openDrawer, closeDrawer, formModal, confirmModal, opt, emptyState, today } from '../ui.js';
 import { docsBlock, uploadDoc } from './docs.js';
 
 let S, D;
@@ -65,7 +65,7 @@ async function openLead(id) {
       <dt>Проект</dt><dd>${esc(D.project_kinds[l.project_kind] || '—')}</dd>
       <dt>Адрес</dt><dd>${esc(l.address || '—')}</dd>
       <dt>КП</dt><dd>${l.offer_sum ? fmt(l.offer_sum) + (l.tariff ? ' · ' + esc(l.tariff) : '') : '—'}</dd>
-      <dt>Заметка</dt><dd>${esc(l.note || '—')}</dd>
+      <dt>Заметка</dt><dd>${l.note ? richText(l.note) : '—'}</dd>
       ${l.utm ? `<dt>Метки</dt><dd class="small mute" style="word-break:break-all">${esc(l.utm)}</dd>` : ''}
     </dl>
     <div class="row">
@@ -76,7 +76,7 @@ async function openLead(id) {
     </div>
     <div id="lead-docs"></div>
     <div class="row sp" style="margin-top:20px"><h3>История</h3><button class="btn s" data-act>+ запись</button></div>
-    <ul class="timeline">${l.activities.map(a => `<li>${esc(a.text)}<small>${dateTimeRu(a.created_at)}${a.user_name ? ' · ' + esc(a.user_name) : ''}</small></li>`).join('') || '<li class="mute">Пусто</li>'}</ul>
+    <ul class="timeline">${l.activities.map(a => `<li>${richText(a.text)}<small>${dateTimeRu(a.created_at)}${a.user_name ? ' · ' + esc(a.user_name) : ''}</small></li>`).join('') || '<li class="mute">Пусто</li>'}</ul>
   `);
   docsBlock(d.querySelector('#lead-docs'), l.documents, { lead_id: l.id }, () => openLead(id), open ? 'Прикрепите КП на этапе «Смета отправлена», договор — при подписании.' : '');
   d.querySelector('[data-next]')?.addEventListener('click', async () => {

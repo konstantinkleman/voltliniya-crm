@@ -36,7 +36,7 @@ function vl_utm_from_url(?string $url): array
     }
     parse_str($query, $q);
     $out = [];
-    foreach (['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'yclid'] as $k) {
+    foreach (['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'source_type', 'yclid'] as $k) {
         if (!empty($q[$k]) && is_string($q[$k])) {
             $out[$k] = mb_substr($q[$k], 0, 200);
         }
@@ -44,8 +44,9 @@ function vl_utm_from_url(?string $url): array
     return $out;
 }
 
-/** Собирает заявку из полей формы и отправляет в CRM. Возвращает ответ CRM или null при ошибке. */
-function vl_send_to_crm(array $post): ?array
+/** Собирает заявку из полей формы и отправляет в CRM. Возвращает ответ CRM или null при ошибке.
+ *  $extra — дополнительные строки текста заявки (например, ссылки на файлы проекта), $title — первая строка. */
+function vl_send_to_crm(array $post, array $extra = [], string $title = 'Заявка с сайта'): ?array
 {
     try {
         // ловушка для ботов: скрытое поле website заполняют только они
@@ -57,10 +58,15 @@ function vl_send_to_crm(array $post): ?array
         };
 
         // текст заявки: все заполненные поля формы с подписями
-        $lines = ['Заявка с сайта'];
+        $lines = [$title];
         foreach (VL_FIELD_LABELS as $k => $label) {
             if ($s($k) !== '') {
                 $lines[] = $label . ': ' . $s($k);
+            }
+        }
+        foreach ($extra as $l) {
+            if (is_string($l) && $l !== '') {
+                $lines[] = $l;
             }
         }
 
