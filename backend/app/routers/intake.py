@@ -114,6 +114,47 @@ def _activity(db: Session, lead: m.Lead, text: str, kind: str = "message"):
 
 @router.post("/lead", response_model=IntakeResult, dependencies=[Depends(check_token)])
 def intake_lead(data: IntakeLead, db: Session = Depends(get_db)):
+    return _intake(data, db)
+
+
+class SiteLead(BaseModel):
+    """Форма сайта. Без токена: форма и так публична, поэтому принимаем только её поля —
+    источник определяется по меткам, стоимость лида и внешний id задать нельзя."""
+    name: str | None = None
+    phone: str
+    message: str | None = None
+    area_m2: Decimal | None = None
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    utm_content: str | None = None
+    utm_term: str | None = None
+    yclid: str | None = None
+    page: str | None = None
+    referrer: str | None = None
+    website: str | None = None          # ловушка для ботов: настоящая форма шлёт пустым
+
+
+SITE_HOURLY_LIMIT = 30   # новых заявок с сайта в час — выше этого похоже на спам-атаку
+
+
+@router.post("/site", response_model=IntakeResult)
+def intake_site(data: SiteLead, db: Session = Depends(get_db)):
+    if data.website:
+        raise HTTPException(400, "Отклонено")
+    digits = re.sub(r"\D", "", data.phone or "")
+    if not 10 <= len(digits) <= 11:
+        raise HTTPException(400, "Неверный телефон")
+    since = datetime.now() - timedelta(hours=1)
+    recent = db.scalars(select(m.Lead).where(m.Lead.created_at >= since, m.Lead.source.like("site%"))).all()
+    if len(recent) >= SITE_HOURLY_LIMIT:
+        raise HTTPException(429, "Слишком много заявок, попробуйте позже")
+    lead = IntakeLead(**{k: (v[:500] if isinstance(v, str) else v) for k, v in data.model_dump(exclude={"website"}).items()})
+    res = _intake(lead, db)
+    return res
+
+
+def _intake(data: IntakeLead, db: Session) -> IntakeResult:
     if not (data.phone or data.external_ref or data.message):
         raise HTTPException(400, "Нужен телефон, id внешней заявки или текст")
     source = resolve_source(data)

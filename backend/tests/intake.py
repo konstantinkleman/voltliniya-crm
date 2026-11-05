@@ -53,4 +53,22 @@ with c:
     assert c.get("/api/dictionaries").json()["sources"]["sms"] == "SMS-рассылка"
     assert c.get("/api/stats/summary").status_code in (200, 404)
 
+# --- форма сайта: без токена, только поля формы ---
+with c:
+    c.headers.pop("Authorization", None)
+    def site(body, code=200):
+        r = c.post("/api/intake/site", json=body)
+        assert r.status_code == code, (body, r.status_code, r.text)
+        return r.json()
+    s1 = site({"name": "Сергей", "phone": "+7 (916) 555-12-34", "message": "Квартира 62 м²", "area_m2": 62.5, "utm_source": "yandex", "utm_campaign": "poisk_msk", "page": "/"})
+    assert s1["created"] and s1["source"] == "site_direct", s1
+    assert site({"phone": "89165551234", "message": "ещё кондиционеры"})["duplicate"] == "phone"
+    site({"phone": "+79990000000", "website": "http://spam"}, code=400)          # бот
+    site({"phone": "123"}, code=400)                                           # не телефон
+    site({"name": "x"}, code=422)                                              # без телефона
+    # нельзя выдать себя за Профи или задать стоимость лида — таких полей у формы нет
+    s2 = site({"phone": "+7 900 777-66-55", "source": "profi", "lead_cost": 9999, "external_ref": "x"})
+    r = c.post("/api/auth/login", data={"username": "d@test.ru", "password": "secret123"}); c.headers["Authorization"] = "Bearer " + r.json()["access_token"]
+    l2 = c.get(f"/api/leads/{s2['lead_id']}").json()
+    assert l2["source"] == "site_other" and float(l2["lead_cost"]) == 0 and not l2["external_ref"], l2
 print("intake OK")

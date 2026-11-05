@@ -2,18 +2,18 @@
 /**
  * ВольтЛиния: отправка заявки с сайта в CRM (crm.voltliniya.ru).
  *
- * Как подключить — в send.php, после того как заявка ушла в Telegram, две строки:
+ * Как подключить — в send.php, ПОСЛЕ того как заявка ушла в Telegram, две строки:
  *
  *     require_once __DIR__ . '/crm-intake.php';
  *     vl_send_to_crm($_POST);
  *
- * Ошибка CRM никогда не ломает форму: отправка в Telegram и ответ посетителю идут как раньше,
- * сбой только пишется в лог хостинга (error_log).
+ * Telegram всегда первый и не зависит от CRM: этот код вызывается после него, ошибки и таймауты CRM
+ * гасятся внутри и только пишутся в лог хостинга (error_log). Ожидание CRM — не больше 5 секунд.
+ *
+ * Токен не нужен: адрес /api/intake/site принимает только поля формы (как и сама публичная форма).
  */
 
-// Адрес приёма заявок CRM и секрет. Токен — строка INTAKE_TOKEN из /opt/voltliniya-crm/.env на сервере CRM.
-const VL_CRM_URL = 'https://crm.voltliniya.ru/api/intake/lead';
-const VL_CRM_TOKEN = 'ВСТАВЬТЕ_СЮДА_ТОКЕН';
+const VL_CRM_URL = 'https://crm.voltliniya.ru/api/intake/site';
 
 // Подписи полей формы «Заявка на расчёт» — для текста заявки в CRM
 const VL_FIELD_LABELS = [
@@ -52,10 +52,6 @@ function vl_send_to_crm(array $post): ?array
         if (!empty($post['website'])) {
             return null;
         }
-        if (VL_CRM_TOKEN === '' || VL_CRM_TOKEN === 'ВСТАВЬТЕ_СЮДА_ТОКЕН') {
-            error_log('crm-intake: не задан токен CRM');
-            return null;
-        }
         $s = function ($k) use ($post) {
             return isset($post[$k]) && is_string($post[$k]) ? trim($post[$k]) : '';
         };
@@ -89,10 +85,10 @@ function vl_send_to_crm(array $post): ?array
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => json_encode($data, JSON_UNESCAPED_UNICODE),
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'X-Intake-Token: ' . VL_CRM_TOKEN],
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_TIMEOUT        => 6,
+            CURLOPT_TIMEOUT        => 5,
         ]);
         $body = curl_exec($ch);
         $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
