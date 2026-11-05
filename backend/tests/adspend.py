@@ -124,6 +124,14 @@ with c:
     assert c.post("/api/intake/expense", json={**body, "category": "sms", "external_ref": "sms:1", "amount": "-1"}, headers=H).status_code == 400
     assert rows()["profi:resp-1"][2] == Decimal("500.00")
 
+    # сборщик из браузера директора (Профи): месячная сумма по ключу, повтор обновляет
+    pb = {"date": str(today), "amount": "4160", "category": "profi", "external_ref": f"profi:{mon}", "note": "Профи · отклики − возвраты"}
+    assert c.post("/api/expenses/upsert", json=pb).status_code == 401
+    assert c.post("/api/expenses/upsert", json=pb, headers=A).json()["result"] == "created"
+    assert c.post("/api/expenses/upsert", json={**pb, "amount": "4747"}, headers=A).json()["result"] == "updated"
+    assert c.post("/api/expenses/upsert", json={**pb, "category": "tools"}, headers=A).status_code == 400
+    assert rows()[f"profi:{mon}"][2] == Decimal("4747.00")
+
     # кнопка «Обновить сейчас»
     assert c.post("/api/expenses/autoload", headers=A).json()["ok"]
 

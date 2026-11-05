@@ -1,6 +1,8 @@
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -73,6 +75,33 @@ def autoload_run(days: int = 7, _: m.User = Depends(director)):
     if not adspend._lock.locked():
         threading.Thread(target=adspend.sync_all, args=(days,), daemon=True).start()
     return {"ok": True}
+
+
+class ExpenseUpsert(BaseModel):
+    date: date
+    amount: Decimal
+    category: str
+    external_ref: str
+    note: str | None = None
+
+
+@router.post("/upsert")
+def upsert_expense(data: ExpenseUpsert, _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Создать или обновить расход по ключу источника — для сборщиков, которые работают из браузера директора
+    (Профи: месячная сумма откликов за вычетом возвратов). Повтор с тем же external_ref обновляет сумму."""
+    from .. import adspend
+    cat = m.EXPENSE_CATEGORIES.get(data.category)
+    if not cat or cat[1] != "channel":
+        raise HTTPException(400, "Категория должна быть рекламным каналом")
+    if data.amount < 0:
+        raise HTTPException(400, "Сумма не может быть отрицательной")
+    ref = data.external_ref.strip()[:120]
+    if not ref:
+        raise HTTPException(400, "Нужен external_ref")
+    what = adspend.upsert_expense(db, ref=ref, day=data.date, amount=data.amount, category=data.category,
+                                  note=(data.note or f"{cat[0]} · автозагрузка")[:500])
+    db.commit()
+    return {"ok": True, "result": what}
 
 
 @router.delete("/{eid}")
