@@ -367,6 +367,7 @@ class ExpenseOut(ORM, ExpenseIn):
     channel: str | None
     foreman_name: str | None = None
     crew_name: str | None = None
+    external_ref: str | None = None   # заполнено — расход загружен автоматически
     created_at: datetime
 
 

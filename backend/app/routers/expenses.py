@@ -53,6 +53,28 @@ def create_expense(data: ExpenseIn, user: m.User = Depends(director), db: Sessio
     return _out(e)
 
 
+@router.get("/autoload")
+def autoload_status(_: m.User = Depends(director)):
+    """Состояние автозагрузки рекламных расходов: какие каналы подключены, когда и чем закончилась загрузка."""
+    from .. import adspend
+    ch = {}
+    for key, (name, configured, _fn) in adspend.CHANNELS.items():
+        ch[key] = {"name": name, "configured": configured(), **adspend.status["channels"].get(key, {})}
+    return {"last_run": adspend.status["last_run"], "running": adspend._lock.locked(), "channels": ch,
+            "every_hours": adspend.SYNC_EVERY_SECONDS // 3600, "days": adspend.SYNC_DAYS}
+
+
+@router.post("/autoload")
+def autoload_run(days: int = 7, _: m.User = Depends(director)):
+    """Загрузить расходы сейчас (в фоне — Директ может строить отчёт до нескольких минут)."""
+    import threading
+    from .. import adspend
+    days = max(1, min(days, 180))
+    if not adspend._lock.locked():
+        threading.Thread(target=adspend.sync_all, args=(days,), daemon=True).start()
+    return {"ok": True}
+
+
 @router.delete("/{eid}")
 def delete_expense(eid: int, _: m.User = Depends(director), db: Session = Depends(get_db)):
     e = db.get(m.Expense, eid)

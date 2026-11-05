@@ -52,6 +52,8 @@ def startup():
                 if not db.scalar(select(m.Warehouse).where(m.Warehouse.foreman_id == u.id)):
                     db.add(m.Warehouse(name=f"Склад {u.name}", foreman_id=u.id))
             db.commit()
+    from . import adspend
+    adspend.start_background()
 
 
 def migrate():
@@ -61,7 +63,7 @@ def migrate():
     wanted = {
         "objects": [("crew_sum_override", "NUMERIC(14,2)"), ("salary_foreman_id", "INTEGER")],
         "material_lines": [("movement_id", "INTEGER")],
-        "expenses": [("crew_id", "INTEGER")],
+        "expenses": [("crew_id", "INTEGER"), ("external_ref", "VARCHAR(120) UNIQUE")],
         "leads": [("external_ref", "VARCHAR(120)"), ("utm", "VARCHAR(500)")],
     }
     with engine.begin() as conn:

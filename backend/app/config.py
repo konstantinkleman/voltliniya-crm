@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     # приём заявок из внешних каналов (форма сайта, сбор с Профи): секрет в заголовке X-Intake-Token.
     # Пустой — приём выключен.
     INTAKE_TOKEN: str = ""
+    # автозагрузка рекламных расходов (пусто — канал не загружается)
+    YANDEX_DIRECT_TOKEN: str = ""     # OAuth-токен с доступом к API Директа
+    YANDEX_DIRECT_LOGIN: str = ""     # логин клиента — только если аккаунт агентский
+    AVITO_CLIENT_ID: str = ""
+    AVITO_CLIENT_SECRET: str = ""
 
 
 settings = Settings()

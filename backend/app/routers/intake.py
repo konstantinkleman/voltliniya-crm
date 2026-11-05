@@ -12,7 +12,7 @@
 """
 import hmac
 import re
-from datetime import datetime, timedelta
+from datetime import date as date_, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import urlparse
 
@@ -215,3 +215,30 @@ def _intake(data: IntakeLead, db: Session) -> IntakeResult:
     _activity(db, lead, f"Заявка создана автоматически · {channel}", "stage")
     db.commit()
     return IntakeResult(lead_id=lead.id, created=True, source=source)
+
+
+# ---------- расходы из каналов без API (Профи, SMS-рассылки) ----------
+class IntakeExpense(BaseModel):
+    date: date_
+    amount: Decimal
+    category: str                 # profi | sms | avito | direct | rsya | ...
+    external_ref: str             # уникальный ключ у источника: «profi:<id отклика>», «sms:<id рассылки>»
+    note: str | None = None
+
+
+@router.post("/expense", dependencies=[Depends(check_token)])
+def intake_expense(data: IntakeExpense, db: Session = Depends(get_db)):
+    """Создать или обновить расход. Повторная отправка с тем же external_ref обновляет сумму, а не дублирует."""
+    from .. import adspend
+    cat = m.EXPENSE_CATEGORIES.get(data.category)
+    if not cat or cat[1] != "channel":
+        raise HTTPException(400, "Категория должна быть рекламным каналом")
+    if data.amount < 0:
+        raise HTTPException(400, "Сумма не может быть отрицательной")
+    ref = data.external_ref.strip()[:120]
+    if not ref:
+        raise HTTPException(400, "Нужен external_ref")
+    what = adspend.upsert_expense(db, ref=ref, day=data.date, amount=data.amount, category=data.category,
+                                  note=(data.note or f"{cat[0]} · автозагрузка")[:500])
+    db.commit()
+    return {"ok": True, "result": what}

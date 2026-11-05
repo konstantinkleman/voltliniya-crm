@@ -91,6 +91,10 @@ if ! grep -q '^INTAKE_TOKEN=.\+' .env; then
   echo
 fi
 
+# 2b''. Автозагрузка рекламных расходов: пустые строки, чтобы было куда вставить ключи.
+grep -q '^YANDEX_DIRECT_TOKEN=' .env || printf '\n# Автозагрузка расходов Яндекс Директа (OAuth-токен API Директа); логин — только для агентского аккаунта\nYANDEX_DIRECT_TOKEN=\nYANDEX_DIRECT_LOGIN=\n' >> .env
+grep -q '^AVITO_CLIENT_ID=' .env || printf '\n# Автозагрузка расходов Авито (ключи из avito.ru/professionals/api)\nAVITO_CLIENT_ID=\nAVITO_CLIENT_SECRET=\n' >> .env
+
 # 2c. Версия сборки = хеш коммита: по ней открытые вкладки CRM понимают, что надо перезагрузиться.
 sed -i '/^APP_VERSION=/d' .env
 echo "APP_VERSION=$(git rev-parse --short HEAD 2>/dev/null || date +%s)" >> .env

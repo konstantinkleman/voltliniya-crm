@@ -288,6 +288,8 @@ class Expense(Base, TimestampMixin):
     method: Mapped[str | None] = mapped_column(String(20))
     note: Mapped[str | None] = mapped_column(Text)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # автозагрузка (Директ, Авито, Профи, SMS): ключ строки у источника — повторная загрузка обновляет, а не дублирует
+    external_ref: Mapped[str | None] = mapped_column(String(120), unique=True)
     foreman: Mapped["User | None"] = relationship(foreign_keys=[foreman_id])
     crew: Mapped["Crew | None"] = relationship()
 
