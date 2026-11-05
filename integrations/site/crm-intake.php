@@ -81,19 +81,34 @@ function vl_send_to_crm(array $post): ?array
         ], $utm);
         $data = array_filter($data, function ($v) { return $v !== null && $v !== ''; });
 
-        $ch = curl_init(VL_CRM_URL);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => json_encode($data, JSON_UNESCAPED_UNICODE),
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_TIMEOUT        => 5,
-        ]);
-        $body = curl_exec($ch);
-        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = curl_error($ch);
-        curl_close($ch);
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+        $err = '';
+        if (function_exists('curl_init')) {
+            $ch = curl_init(VL_CRM_URL);
+            curl_setopt_array($ch, [
+                CURLOPT_POST           => true,
+                CURLOPT_POSTFIELDS     => $json,
+                CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT        => 5,
+            ]);
+            $body = curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $err = curl_error($ch);
+            curl_close($ch);
+        } else {
+            // без curl — как в send.php, через stream_context
+            $ctx = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n",
+                'content' => $json, 'timeout' => 5, 'ignore_errors' => true]]);
+            $body = @file_get_contents(VL_CRM_URL, false, $ctx);
+            $code = 0;
+            foreach ($http_response_header ?? [] as $h) {
+                if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $mm)) {
+                    $code = (int)$mm[1];
+                }
+            }
+        }
         if ($body === false || $code !== 200) {
             error_log('crm-intake: CRM ответила ' . $code . ' ' . $err . ' ' . mb_substr((string)$body, 0, 300));
             return null;
