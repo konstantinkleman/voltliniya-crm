@@ -70,7 +70,7 @@ assert ads.parse_avito_spendings({"result": {"items": []}}) == []
 
 c = TestClient(main.app)
 with c:
-    tok = c.post("/api/auth/login", json={"email": "d@test.ru", "password": "secret123"}).json()["access_token"]
+    tok = c.post("/api/auth/login", data={"username": "d@test.ru", "password": "secret123"}).json()["access_token"]
     A = {"Authorization": "Bearer " + tok}
 
     st = ads.sync_all(days=40 if today.day > 7 else 7)
