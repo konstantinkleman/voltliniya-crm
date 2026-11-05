@@ -85,7 +85,7 @@ with c:
     mon = f"{today:%Y-%m}"
     assert r[f"direct:{mon}:search"][:3] == ("direct", "site_direct", Decimal("1200.50")), r
     assert r[f"direct:{mon}:search"][3] == d2
-    assert r[f"direct:{mon}:network"][:3] == ("rsya", "site_rsya", Decimal("300.00")), r
+    assert r[f"direct:{mon}:rsya"][:3] == ("rsya", "site_rsya", Decimal("300.00")), r
     assert r[f"direct:{prev:%Y-%m}:search"][:3] == ("direct", "site_direct", Decimal("50.00")), r
     assert r[f"avito:{mon}"][:3] == ("avito", "avito", Decimal("200.50")), r
     n = len(r)
@@ -96,7 +96,7 @@ with c:
     ads.sync_all()
     r = rows()
     assert len(r) == n, r
-    assert r[f"direct:{mon}:network"][2] == Decimal("350.00")
+    assert r[f"direct:{mon}:rsya"][2] == Decimal("350.00")
 
     # ошибка одного канала не мешает другому
     orig = ads.fetch_avito
