@@ -99,7 +99,10 @@ async def main():
             assert r.ok and r.headers["content-type"] == "application/pdf", (kind, r.status)
             body = await r.body()
             open(f"{OUT}/pdf-{kind}.pdf", "wb").write(body)
-            assert body.count(b"/Type /Page") - body.count(b"/Type /Pages") == 1, f"{kind}: больше одной страницы"
+            from pypdf import PdfReader
+            import io as _io
+            pr = PdfReader(_io.BytesIO(body))
+            assert len(pr.pages) == 1 and float(pr.pages[0].mediabox.height) < 3000 * 72 / 25.4, f"{kind}: {len(pr.pages)} стр."
         # договор с планшета: данные заказчика, суммы, пакет документов
         eid = int(pg.url.split("#/calc/")[1].split("/")[0].split("?")[0])
         await tp.click("[data-contract]"); await tp.wait_for_selector(".contract [data-f=fio]"); await tp.wait_for_timeout(400)

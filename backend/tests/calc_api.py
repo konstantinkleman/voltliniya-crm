@@ -131,6 +131,7 @@ with c:
         pr = _PR0(_io0.BytesIO(r.content))
         h_mm = float(pr.pages[0].mediabox.height) * 25.4 / 72
         assert len(pr.pages) == 1 and abs(float(pr.pages[0].mediabox.width) * 25.4 / 72 - 210) < 1, (kind, len(pr.pages))
+        assert 100 < h_mm < 3000, (kind, h_mm)
         print(f"pdf {kind}: 1 страница, {h_mm:.0f} мм")
     assert c.get(f"/api/estimates/{e5['id']}/pdf/zzz").status_code == 404
     tok5 = ok(c.post(f"/api/estimates/{e5['id']}/share"))["token"]

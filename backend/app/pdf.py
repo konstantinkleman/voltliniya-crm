@@ -19,7 +19,7 @@ def single_page(html: str, width_mm: float = 210) -> bytes:
     from weasyprint import CSS, HTML
     doc = HTML(string=html).render(stylesheets=[CSS(string=f"@page{{size:{width_mm}mm 5000mm;margin:0}} {BASE}")])
     if len(doc.pages) == 1:
-        h = _bottom(doc.pages[0]._page_box) * MM + 1
+        h = max((_bottom(c) for c in doc.pages[0]._page_box.children), default=0) * MM + 1   # сама страница не в счёт
     else:                                   # длиннее 5 м — оставляем постраничную печать
         return doc.write_pdf()
     return HTML(string=html).write_pdf(stylesheets=[CSS(string=f"@page{{size:{width_mm}mm {max(h, 50):.1f}mm;margin:0}} {BASE}")])
