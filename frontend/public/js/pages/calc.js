@@ -16,6 +16,7 @@ export async function render(main, r, state) {
     location.replace('#/calc/' + e.id);
     return;
   }
+  if (r.id && r.sub === 'contract') return renderContract(main, Number(r.id));
   if (r.id) return renderEditor(main, Number(r.id));
   return renderList(main);
 }
@@ -221,7 +222,7 @@ async function renderEditor(main, id) {
     const mg = res.margin[tariff === 'basic' ? 'basic' : 'std'];
     resEl.innerHTML = `
       <div class="tcards">${TARIFFS.map(k => `<button type="button" class="tcard ${k === tariff ? 'on' : ''}" data-t="${k}">
-        <span>${TN[k]}</span><b>${fmt(K[k].price)}</b><small>${num(K[k].per_m2)} ₽/м² · точно ${fmt(T[k].price)}</small></button>`).join('')}</div>
+        <span>${TN[k]}</span><b>${fmt(K[k].price)}</b><small>${num(K[k].per_m2)} ₽/м²</small></button>`).join('')}</div>
       ${res.warnings.length ? `<div class="warnbox">${res.warnings.map(esc).join('<br>')}</div>` : ''}
       <div class="card pad" style="margin-top:12px">
         <h3 style="margin:0 0 8px">${TN[tariff]}: из чего цена</h3>
@@ -260,12 +261,14 @@ async function renderEditor(main, id) {
         <button type="button" class="btn" data-doc="smeta">Смета</button>
         <button type="button" class="btn" data-doc="panel">Щит</button>
         <button type="button" class="btn" data-share>Отправить КП</button>
+        <button type="button" class="btn" data-contract>Договор</button>
         <button type="button" class="btn" data-more aria-label="Ещё">⋯</button>
       </div>`;
     bar.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { tariff = b.dataset.t; drawResults(); drawBar(); schedule(100); });
     bar.querySelectorAll('[data-doc]').forEach(b => b.onclick = () => openDoc(id, b.dataset.doc, tariff, flush));
     bar.querySelector('[data-share]').onclick = () => shareKp(id, est, flush);
     bar.querySelector('[data-more]').onclick = () => moreMenu();
+    bar.querySelector('[data-contract]').onclick = async () => { await flush(); location.hash = `#/calc/${id}/contract`; };
   }
 
   async function flush() {
@@ -365,10 +368,16 @@ async function renderParams(main) {
   const pOpts = products.filter(p => p.is_active !== false).map(p => ({ value: p.id, label: p.name, sub: p.client_price ? fmt(p.client_price) : 'без цены клиенту' }));
   const isPct = (it) => (it.unit || '').startsWith('%');
   const show = (v, it) => v === null || v === undefined ? '' : (isPct(it) ? +(v * 100).toFixed(4) : v);
+  const checks = data.sections.flatMap(s => s.items.filter(it => it.check));
+  const onlyCheck = renderParams.onlyCheck && checks.length;
   main.innerHTML = `<div class="head"><div><h1>Расценки и нормы калькулятора</h1><p>Перенесены с листа «Расценки». Меняются здесь — новые расчёты считаются по новым значениям, сохранённые КП не меняются.</p></div>
     <div class="row"><a class="btn" href="#/calc">← Расчёты</a></div></div>
+    ${checks.length ? `<div class="infobox warn"><b>Требуют проверки: ${checks.length}</b> — значения, которые в Excel были помечены «ПРОВЕРИТЬ». Если цифра верная — нажмите «Верно»; если нет — исправьте её, отметка снимется сама.
+      <button class="btn s" data-only>${onlyCheck ? 'Показать все строки' : 'Показать только их'}</button></div>` : ''}
     <div class="infobox">Цены материалов, автоматики и корпусов можно привязать к позиции склада: если у позиции задана цена клиенту, калькулятор возьмёт её, а в расчёте появится наценка по себестоимости.</div>
-    ${data.sections.map(sec => `<div class="card wrap" style="margin-top:14px"><h3 style="padding:12px 14px 0;margin:0">${esc(sec.title)}</h3>
+    ${data.sections.map(sec => ({ ...sec, items: onlyCheck ? sec.items.filter(it => it.check) : sec.items })).filter(sec => sec.items.length).map(sec => sec.section === 'contractor' ? `<div class="card wrap" style="margin-top:14px"><h3 style="padding:12px 14px 0;margin:0">${esc(sec.title)}</h3>
+      <p class="small mute" style="padding:4px 14px 0;margin:0">Подставляются в раздел «Реквизиты сторон» договора. Хранятся только в CRM.</p>
+      <table class="params">${sec.items.map(it => `<tr><td>${esc(it.label)}</td><td><input type="text" class="txt" data-key="${it.key}" data-col="vtext" value="${esc(it.vtext || '')}"></td></tr>`).join('')}</table></div>` : `<div class="card wrap" style="margin-top:14px"><h3 style="padding:12px 14px 0;margin:0">${esc(sec.title)}</h3>
       <table class="params"><tr><th>Позиция</th>${sec.cols.map(c => `<th class="num">${esc(c)}</th>`).join('')}<th>Ед.</th><th>Склад</th></tr>
       ${sec.items.map(it => {
         const cols = ['v1', 'v2', 'v3'].slice(0, sec.cols.length);
@@ -381,14 +390,21 @@ async function renderParams(main) {
             return `<td class="num"><input type="number" step="any" inputmode="decimal" data-key="${it.key}" data-col="${c}" data-pct="${isPct(it) ? 1 : ''}" value="${show(it[c], it)}" ${overridden ? 'disabled title="Цена берётся со склада"' : ''}>${overridden ? `<div class="small ok">${fmt(l.product_price)} со склада</div>` : ''}</td>`;
           }).join('');
         const links = (it.links || []).map(l => `<div class="small">${sec.section === 'auto' ? (l.col === 'v1' ? 'Dekraft: ' : 'ABB: ') : ''}${l.product_id ? `${esc(l.product_name)} <button class="btn s" data-unlink="${it.key}" data-f="${l.field}">×</button>` : `<button class="btn s" data-link="${it.key}" data-f="${l.field}">привязать</button>`}</div>`).join('');
-        return `<tr><td>${esc(it.label)}${it.note ? `<div class="small mute">${esc(it.note)}</div>` : ''}</td>${cells}<td class="small mute">${esc(isPct(it) ? '%' : (it.unit || ''))}</td><td>${links}</td></tr>`;
+        return `<tr class="${it.check ? 'chk' : ''}"><td>${esc(it.label)}${it.note ? `<div class="small mute">${it.check ? '<span class="chk-tag">проверить</span>' : ''}${esc(it.check ? it.note.replace(/\s*[,;—–-]?\s*ПРОВЕРИТЬ\s*[—–;,:-]?\s*/i, ' ').replace(/^[\s;,—–-]+|[\s;,—–-]+$/g, '') : it.note)}</div>` : ''}${it.check ? `<button class="btn s" data-confirm="${it.key}" style="margin-top:4px">Верно</button>` : ''}</td>${cells}<td class="small mute">${esc(isPct(it) ? '%' : (it.unit || ''))}</td><td>${links}</td></tr>`;
       }).join('')}</table></div>`).join('')}`;
   main.querySelectorAll('input[data-key], select[data-key]').forEach(el => el.addEventListener('change', async () => {
     const body = {};
     if (el.dataset.col === 'vtext') body.vtext = el.value;
     else body[el.dataset.col] = el.value === '' ? null : (el.dataset.pct ? Number(el.value) / 100 : Number(el.value));
-    try { await api.patch('/api/calc/params/' + el.dataset.key, body); toast('Сохранено'); } catch (e) { toast(e.message, true); }
+    try {
+      await api.patch('/api/calc/params/' + el.dataset.key, body); toast('Сохранено');
+      if (el.closest('tr')?.classList.contains('chk')) renderParams(main);
+    } catch (e) { toast(e.message, true); }
   }));
+  main.querySelector('[data-only]')?.addEventListener('click', () => { renderParams.onlyCheck = !onlyCheck; renderParams(main); });
+  main.querySelectorAll('[data-confirm]').forEach(b => b.onclick = async () => {
+    try { await api.patch('/api/calc/params/' + b.dataset.confirm, { confirm: true }); toast('Отмечено как проверенное'); renderParams(main); } catch (e) { toast(e.message, true); }
+  });
   main.querySelectorAll('[data-unlink]').forEach(b => b.onclick = async () => { await api.patch('/api/calc/params/' + b.dataset.unlink, { unlink: [b.dataset.f] }); renderParams(main); });
   main.querySelectorAll('[data-link]').forEach(b => b.onclick = () => {
     const m = openModal(`<h2>Привязать к позиции склада</h2><p class="small mute">Цена клиенту будет браться из карточки позиции на складе.</p>
@@ -401,4 +417,163 @@ async function renderParams(main) {
       try { await api.patch('/api/calc/params/' + b.dataset.link, { [b.dataset.f]: pid }); closeModal(); toast('Привязано'); renderParams(main); } catch (e) { toast(e.message, true); }
     };
   });
+}
+
+// ---------- договор ----------
+const DATE_FIELDS = new Set(['date', 'start', 'end', 'birth', 'pass_date']);
+const WIDE = new Set(['address', 'pass_issued', 'reg_address', 'org_name', 'legal_address', 'signer', 'bank']);
+const PH = { number: 'например, 1611/26', address: 'индекс, город, улица, дом, корпус, квартира', pass_issued: 'как в паспорте', pass_code: '000-000',
+  reg_address: 'как в штампе о регистрации', signer: 'генерального директора Иванова Ивана Ивановича', basis: 'Устава / записи в ЕГРИП',
+  sign_name: 'Иванов И.И.', phone: '+7 …', org_phone: '+7 …' };
+
+async function authFetch(url) {
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
+  if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch {} throw new Error(d); }
+  return r.blob();
+}
+
+async function saveFile(url, name, share = false) {
+  const blob = await authFetch(url);
+  const file = new File([blob], name, { type: blob.type });
+  if (share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
+async function renderContract(main, id) {
+  let st = await api.get(`/api/estimates/${id}/contract`);
+  let data = st.data;
+  const ocr = new Set();       // поля, подставленные распознаванием (подсвечены до правки)
+  let saveT = null, dirty = false;
+  main.classList.add('calc-main');
+  main.innerHTML = `<div class="calc contract">
+    <div class="calc-top"><a href="#/calc/${id}" class="small">← к расчёту</a><span class="small mute" data-status>${st.saved ? 'Сохранено' : 'Новый договор'}</span></div>
+    <h1 style="margin:4px 0 2px">Договор подряда</h1><p class="small mute" style="margin:0 0 12px">${esc(st.title || 'Расчёт')} · от ИП Клемань К. В.</p>
+    <div data-body></div>
+    <div class="calc-bar" data-bar></div>
+  </div>`;
+  const body = main.querySelector('[data-body]');
+  const bar = main.querySelector('[data-bar]');
+  const status = main.querySelector('[data-status]');
+  window.onbeforeunload = () => (dirty ? true : undefined);
+
+  const schedule = (delay = 600) => { dirty = true; status.textContent = 'Сохраняю…'; clearTimeout(saveT); saveT = setTimeout(save, delay); };
+  async function save(tariff) {
+    try {
+      st = await api.put(`/api/estimates/${id}/contract`, { data, tariff });
+      dirty = false; status.textContent = 'Сохранено';
+      drawSums(); drawMissing(); drawBar();
+    } catch (e) { status.textContent = 'Не сохранено'; toast(e.message, true); }
+  }
+  async function flush() { if (dirty) { clearTimeout(saveT); await save(); } }
+
+  const field = ([k, label]) => {
+    const v = data[k] ?? '';
+    const type = DATE_FIELDS.has(k) ? 'date' : (k === 'email' || k === 'org_email' ? 'email' : (k === 'phone' || k === 'org_phone' ? 'tel' : 'text'));
+    return `<label class="cf ${WIDE.has(k) ? 'wide' : ''} ${ocr.has(k) ? 'ocr' : ''}"><span>${esc(label)}</span>
+      <input type="${type}" data-f="${k}" value="${esc(v)}" placeholder="${esc(PH[k] || '')}" ${k === 'pass_series' || k === 'pass_number' || k === 'inn' || k === 'ogrn' || k === 'bik' ? 'inputmode="numeric"' : ''}></label>`;
+  };
+
+  function draw() {
+    const kind = data.kind || 'person';
+    const common = st.fields.common.filter(([k]) => k !== 'advance');
+    body.innerHTML = `
+      <section class="cs ocr-box"><h3>Распознать документ</h3>
+        <p class="small mute" style="margin:0 0 10px">Сфотографируйте разворот паспорта с фото${kind === 'person' ? ' и страницу с пропиской' : ''} или карточку реквизитов ИП/ООО — данные подставятся в договор. Можно выбрать до 4 фото сразу. Фото не сохраняется.</p>
+        ${st.ocr_ready ? `<label class="btn p upl">Фото документа<input type="file" accept="image/*" multiple data-ocr hidden></label> <span class="small mute" data-ocr-status></span>`
+          : `<div class="infobox">Распознавание пока не подключено: на сервере нужен ключ ${st.ocr_provider === 'yandex' ? 'Yandex Vision (YANDEX_VISION_API_KEY и YANDEX_FOLDER_ID)' : 'OpenAI (OPENAI_API_KEY — тот же, что для накладных)'} в .env. Поля можно заполнить вручную.</div>`}
+      </section>
+      <section class="cs"><h3>Договор</h3>
+        <div class="cf-line"><span>Тариф</span><div class="seg2" data-tariff>${TARIFFS.map(t => `<button type="button" data-v="${t}" class="${st.tariff === t ? 'on' : ''}">${TN[t]}</button>`).join('')}</div></div>
+        <div class="cf-grid">${common.map(field).join('')}</div>
+        <div data-sums></div>
+      </section>
+      <section class="cs"><h3>Заказчик</h3>
+        <div class="cf-line"><span>Кто заказчик</span><div class="seg2" data-kind><button type="button" data-v="person" class="${kind === 'person' ? 'on' : ''}">Физлицо</button><button type="button" data-v="org" class="${kind === 'org' ? 'on' : ''}">ИП или ООО</button></div></div>
+        <div class="cf-grid">${(kind === 'person' ? st.fields.person : st.fields.org).map(field).join('')}</div>
+      </section>
+      <div data-missing></div>`;
+    body.querySelectorAll('input[data-f]').forEach(el => el.addEventListener('input', () => {
+      data[el.dataset.f] = el.value; ocr.delete(el.dataset.f); el.closest('.cf')?.classList.remove('ocr'); schedule();
+    }));
+    body.querySelectorAll('[data-tariff] button').forEach(b => b.onclick = async () => {
+      body.querySelectorAll('[data-tariff] button').forEach(x => x.classList.toggle('on', x === b));
+      clearTimeout(saveT); await save(b.dataset.v);
+    });
+    body.querySelectorAll('[data-kind] button').forEach(b => b.onclick = () => { data.kind = b.dataset.v; draw(); schedule(100); });
+    const up = body.querySelector('[data-ocr]');
+    if (up) up.onchange = () => recognize([...up.files]);
+    drawSums(); drawMissing();
+  }
+
+  function drawSums() {
+    const n = st.numbers;
+    const el = body.querySelector('[data-sums]'); if (!el) return;
+    el.innerHTML = `<dl class="dl2 sums">
+      <dt>Цена договора</dt><dd><b>${fmt(n.price)}</b>${n.tariff === 'basic' ? ' <span class="small mute">ориентировочно, по факту</span>' : ''}</dd>
+      <dt>Аванс</dt><dd><input type="number" inputmode="numeric" data-adv value="${data.advance ?? ''}" placeholder="${n.advance_default}"> <span class="small mute">по умолчанию — материалы, до тысяч</span></dd>
+      ${n.stage2 ? `<dt>Этап 2 (чистовая)</dt><dd>${fmt(n.stage2)} <span class="small mute">до ${n.mech} шт.</span></dd>` : ''}
+      <dt>Окончательный расчёт</dt><dd>${fmt(n.rest)}</dd>
+      <dt>Гарантия</dt><dd>${n.guarantee} мес.</dd>
+      <dt>Бесплатных изменений</dt><dd>${n.limit || '—'}</dd>
+      <dt>Автоматика</dt><dd>${esc(n.brand)}</dd></dl>`;
+    const adv = el.querySelector('[data-adv]');
+    adv.oninput = () => { data.advance = adv.value === '' ? null : Number(adv.value); schedule(); };
+  }
+
+  function drawMissing() {
+    const el = body.querySelector('[data-missing]'); if (!el) return;
+    el.innerHTML = st.missing.length ? `<div class="infobox warn"><b>Не заполнено</b> — в документах останутся пропуски «[___]», их можно вписать от руки:<br>${st.missing.map(esc).join(' · ')}
+      ${st.missing.some(x => x.startsWith('Реквизиты исполнителя')) ? '<br><a href="#/calc/params">Реквизиты исполнителя — в «Расценках», внизу страницы</a>' : ''}</div>` : '<div class="infobox ok">Все поля заполнены.</div>';
+  }
+
+  async function recognize(files) {
+    if (!files.length) return;
+    const s = body.querySelector('[data-ocr-status]');
+    s.textContent = 'Распознаю…';
+    const form = new FormData(); files.slice(0, 4).forEach(f => form.append('files', f));
+    try {
+      const r = await api.upload('/api/contract/recognize', form);
+      const f = r.fields || {};
+      if (f.kind) data.kind = f.kind;
+      let n = 0;
+      for (const [k, v] of Object.entries(f)) { if (k !== 'kind' && v) { data[k] = v; ocr.add(k); n++; } }
+      draw(); schedule(100);
+      const what = { passport: 'паспорт', registration: 'прописка', org: 'реквизиты', unknown: 'не распознано' };
+      body.querySelector('[data-ocr-status]').textContent = n ? `Подставлено полей: ${n} (${r.kinds.map(k => what[k]).join(', ')}) — проверьте подсвеченные` : 'Данных не нашлось';
+      if (!n && r.text) openModal(`<h2>Распознанный текст</h2><p class="small mute">Поля определить не удалось — скопируйте нужное вручную.</p><pre class="ocr-text">${esc(r.text)}</pre><div class="actions"><button class="btn" data-cancel>Закрыть</button></div>`).querySelector('[data-cancel]').onclick = closeModal;
+    } catch (e) { s.textContent = ''; toast(e.message, true); }
+  }
+
+  function drawBar() {
+    bar.innerHTML = `<div class="bar-prices"><span class="small mute">${TN[st.tariff]} · ${fmt(st.numbers.price)}</span></div>
+      <div class="bar-acts">
+        <button type="button" class="btn p" data-zip>Скачать пакет</button>
+        <button type="button" class="btn" data-one>Файлы по одному</button>
+        ${st.lead_id ? '<button type="button" class="btn" data-lead>В документы заявки</button>' : ''}
+      </div>`;
+    bar.querySelector('[data-zip]').onclick = async () => {
+      try { await flush(); await saveFile(`/api/estimates/${id}/contract/files`, `Договор_${(data.number || id).toString().replace(/[^\wа-яё-]+/gi, '-')}.zip`, true); } catch (e) { toast(e.message, true); }
+    };
+    bar.querySelector('[data-one]').onclick = async () => {
+      await flush();
+      const list = await api.get(`/api/estimates/${id}/contract/list`);
+      const m = openModal(`<h2>Документы</h2><p class="small mute">Word и Excel — открываются на iPad в «Файлах», печать оттуда.</p>
+        <div class="big">${list.map(f => `<button data-n="${esc(f.name)}">${esc(f.title)} <span class="small mute">${f.name.endsWith('.xlsx') ? 'Excel' : 'Word'}</span></button>`).join('')}</div>
+        <div class="actions"><button class="btn" data-cancel>Закрыть</button></div>`);
+      m.querySelector('[data-cancel]').onclick = closeModal;
+      m.querySelectorAll('[data-n]').forEach(b => b.onclick = async () => {
+        try { await saveFile(`/api/estimates/${id}/contract/files?name=${encodeURIComponent(b.dataset.n)}`, b.dataset.n, true); } catch (e) { toast(e.message, true); }
+      });
+    };
+    bar.querySelector('[data-lead]')?.addEventListener('click', async () => {
+      try { await flush(); const r = await api.post(`/api/estimates/${id}/contract/to-lead`, {}); toast(`В заявку сохранено файлов: ${r.count}`); } catch (e) { toast(e.message, true); }
+    });
+  }
+
+  draw(); drawBar();
 }

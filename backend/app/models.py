@@ -419,5 +419,6 @@ class Estimate(Base, TimestampMixin):
     tariff: Mapped[str] = mapped_column(String(20), default="std")   # выбранный тариф для сметы и щита
     summary: Mapped[str] = mapped_column(Text, default="{}")         # JSON цен по тарифам для списков
     share_token: Mapped[str | None] = mapped_column(String(40), unique=True)
+    contract: Mapped[str | None] = mapped_column(Text)               # JSON данных договора (заказчик, номер, даты)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     lead: Mapped["Lead | None"] = relationship()

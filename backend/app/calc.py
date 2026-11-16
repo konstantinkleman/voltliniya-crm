@@ -77,7 +77,7 @@ def default_inputs(P: dict | None = None) -> dict:
         "sockets": 0, "lv": 0, "switches": 0, "lights": 0, "out220": 0, "junctions": 0,
         "cust_cable25": 0, "draw15": 0, "draw25": 0, "windows": 0,
         "chase": True, "route": "ceiling", "discount": False,
-        "phase": "3", "main_a": 32, "brand": p.t("general.brand", "Dekraft") or "Dekraft", "case_type": "flush",
+        "phase": "3", "main_a": 32, "brand": p.t("general.brand", "ABB") or "ABB", "case_type": "flush",
         "kup": None,
         "oven": False, "hob": False, "hob_len": None, "dishwasher": False, "washer": False, "dryer": False,
         "apron": False, "fridge": False, "flow": False, "flow_len": None, "boiler": False, "neptun": False,
@@ -301,24 +301,40 @@ def compute(inp: dict, P: dict) -> dict:
             "panel_nominal": pn["assembly_qty"],
         }
 
-    return {
+    res = {
         "inputs": d, "volumes": volumes, "works": works, "works_total": works_total, "finishing": finishing,
         "finishing_total": finishing_total, "materials": materials, "materials_total": materials_total,
         "panel": {"std": panel_std, "basic": panel_basic}, "tariffs": tariffs,
         "prices": {"add_point": disc(p.v("tariff.add_point")), "move_point": disc(p.v("tariff.move_point")),
                    "tour_option": S * p.v("tariff.tour_price"), "tour_cost": S * p.v("tariff.tour_cost"),
                    "taping": taping_price, "trash": trash_price},
-        "kp": kp_numbers(tariffs, S),
         "margin": margin(materials, panel_std, panel_basic),
         "warnings": warnings(d, volumes, rooms),
     }
+    res["kp"] = kp_numbers(res, S)
+    return res
 
 
-def kp_numbers(tariffs: dict, S: float) -> dict:
+def shown(x) -> float:
+    """Количество и цена строки сметы так, как они печатаются (до копеек)."""
+    return xround(float(x or 0), 2)
+
+
+def smeta_price(sm: dict) -> float:
+    """Итог = сумма строк сметы в напечатанном виде, до рубля: так сходятся смета, КП и договор."""
+    return xround(sum(shown(ln["qty"]) * shown(ln["price"]) for s in sm["sections"]
+                      for ln in s["lines"] + s.get("panel", []) if ln["qty"] > 0))
+
+
+def kp_numbers(res: dict, S: float) -> dict:
+    """Цены КП без округления (решение владельца 16.11.2026): ровно та сумма, что попадёт в договор.
+    В Excel КП округлял до тысяч; точная сумма тарифа без печатного округления строк — в res["tariffs"][t]["price"]."""
     out = {}
-    for t, x in tariffs.items():
-        out[t] = {"price": xround(x["price"], -3), "works": xround(x["works_total"] + x["taping"] + x["trash"], -3),
-                  "materials": xround(x["materials_total"], -3), "per_m2": xround(x["price"] / S, -2) if S else 0}
+    for t in TARIFFS:
+        sm = smeta(res, t)
+        price = smeta_price(sm)
+        mats = xround(next(x["total"] for x in sm["sections"] if x["title"].endswith("Материалы")))
+        out[t] = {"price": price, "works": price - mats, "materials": mats, "per_m2": xround(price / S) if S else 0}
     return out
 
 
@@ -533,7 +549,7 @@ def kp(res: dict) -> dict:
         "conditions": [
             f"Изменения сверх лимита: добавление точки {fmt_int(pr['add_point'])} ₽, перенос {fmt_int(pr['move_point'])} ₽.",
             f"Расчёт сделан для ввода: {'3 фазы' if d['phase'] == '3' else '1 фаза'}, вводной автомат {d['main_a']:g} А.",
-            "Стоимость предварительная, по проекту. Точная смета — после трассировки кабеля по плану.",
+            "Стоимость рассчитана по проекту и замеру. В «Стандарте» и «Под ключ» она фиксируется в договоре и не меняется; в «Базовом» уточняется по фактическому объёму после монтажа.",
             "Цены на материалы действительны 7 дней с даты предложения.",
         ],
     }
