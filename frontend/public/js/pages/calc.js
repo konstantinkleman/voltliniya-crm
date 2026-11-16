@@ -222,7 +222,7 @@ async function renderEditor(main, id) {
     const mg = res.margin[tariff === 'basic' ? 'basic' : 'std'];
     resEl.innerHTML = `
       <div class="tcards">${TARIFFS.map(k => `<button type="button" class="tcard ${k === tariff ? 'on' : ''}" data-t="${k}">
-        <span>${TN[k]}</span><b>${fmt(K[k].price)}</b><small>${num(K[k].per_m2)} ₽/м²</small></button>`).join('')}</div>
+        <span>${TN[k]}</span><b>${fmtk(K[k].price)}</b><small>${num(K[k].per_m2)} ₽/м²</small></button>`).join('')}</div>
       ${res.warnings.length ? `<div class="warnbox">${res.warnings.map(esc).join('<br>')}</div>` : ''}
       <div class="card pad" style="margin-top:12px">
         <h3 style="margin:0 0 8px">${TN[tariff]}: из чего цена</h3>
@@ -255,7 +255,7 @@ async function renderEditor(main, id) {
   }
 
   function drawBar() {
-    bar.innerHTML = `<div class="bar-prices">${TARIFFS.map(k => `<button type="button" class="${k === tariff ? 'on' : ''}" data-t="${k}"><span>${TN[k]}</span><b>${fmt(res.kp[k].price)}</b></button>`).join('')}</div>
+    bar.innerHTML = `<div class="bar-prices">${TARIFFS.map(k => `<button type="button" class="${k === tariff ? 'on' : ''}" data-t="${k}"><span>${TN[k]}</span><b>${fmtk(res.kp[k].price)}</b></button>`).join('')}</div>
       <div class="bar-acts">
         <button type="button" class="btn p" data-doc="kp">КП</button>
         <button type="button" class="btn" data-doc="smeta">Смета</button>
@@ -278,7 +278,7 @@ async function renderEditor(main, id) {
   function moreMenu() {
     const m = openModal(`<h2>${esc(est.title || 'Расчёт')}</h2>
       <div class="big">
-        ${est.lead_id ? `<button data-a="tolead">Записать сумму КП в заявку (${TN[tariff]}, ${fmt(res.kp[tariff].price)})</button>` : `<button data-a="link">Привязать к заявке</button>`}
+        ${est.lead_id ? `<button data-a="tolead">Записать сумму КП в заявку (${TN[tariff]}, ${fmtk(res.kp[tariff].price)})</button>` : `<button data-a="link">Привязать к заявке</button>`}
         <button data-a="copy">Сделать копию расчёта</button>
         ${est.share_token ? '<button data-a="unshare">Отключить ссылку на КП</button>' : ''}
         <button data-a="refresh">Пересчитать по текущим расценкам</button>
@@ -419,21 +419,25 @@ async function renderParams(main) {
   });
 }
 
-// ---------- договор ----------
-const DATE_FIELDS = new Set(['date', 'start', 'end', 'birth', 'pass_date']);
-const WIDE = new Set(['address', 'pass_issued', 'reg_address', 'org_name', 'legal_address', 'signer', 'bank']);
+// ---------- договор (пакет ИП: договор, смета работ, спецификация, дизайн-проект, акт) ----------
+const fmtk = (n) => new Intl.NumberFormat('ru-RU', { minimumFractionDigits: Math.abs(n % 1) > 0.004 ? 2 : 0, maximumFractionDigits: 2 }).format(Number(n) || 0) + ' ₽';
+const DATE_FIELDS = new Set(['date', 'end', 'birth', 'pass_date']);
+const WIDE = new Set(['address', 'pass_issued', 'reg_address', 'org_name', 'legal_address', 'signer', 'bank', 'design_sheets']);
+const NUMERIC = new Set(['pass_series', 'pass_number', 'inn', 'ogrn', 'kpp', 'bik', 'account', 'corr']);
 const PH = { number: 'например, 1611/26', address: 'индекс, город, улица, дом, корпус, квартира', pass_issued: 'как в паспорте', pass_code: '000-000',
-  reg_address: 'как в штампе о регистрации', signer: 'генерального директора Иванова Ивана Ивановича', basis: 'Устава / записи в ЕГРИП',
-  sign_name: 'Иванов И.И.', phone: '+7 …', org_phone: '+7 …' };
+  reg_address: 'как в штампе о регистрации', signer: 'генерального директора Иванова Ивана Ивановича', basis: 'Устава',
+  sign_name: 'Иванов И.И.', phone: '+7 …', org_phone: '+7 …', design_sheets: 'листы 09–11: план светильников, план розеток',
+  design_pages: '9-11', org_name: 'ООО «…» / Индивидуальный предприниматель …' };
+const KIND_NAMES = { person: 'Физлицо', ip: 'ИП', org: 'ООО' };
 
-async function authFetch(url) {
-  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
+async function authFetch(url, opts = {}) {
+  const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
   if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch {} throw new Error(d); }
-  return r.blob();
+  return r;
 }
 
 async function saveFile(url, name, share = false) {
-  const blob = await authFetch(url);
+  const blob = await (await authFetch(url)).blob();
   const file = new File([blob], name, { type: blob.type });
   if (share && navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
@@ -452,7 +456,7 @@ async function renderContract(main, id) {
   main.classList.add('calc-main');
   main.innerHTML = `<div class="calc contract">
     <div class="calc-top"><a href="#/calc/${id}" class="small">← к расчёту</a><span class="small mute" data-status>${st.saved ? 'Сохранено' : 'Новый договор'}</span></div>
-    <h1 style="margin:4px 0 2px">Договор подряда</h1><p class="small mute" style="margin:0 0 12px">${esc(st.title || 'Расчёт')} · от ИП Клемань К. В.</p>
+    <h1 style="margin:4px 0 2px">Договор на производство электромонтажных работ</h1><p class="small mute" style="margin:0 0 12px">${esc(st.title || 'Расчёт')} · от ИП Клемань К. В.</p>
     <div data-body></div>
     <div class="calc-bar" data-bar></div>
   </div>`;
@@ -473,28 +477,36 @@ async function renderContract(main, id) {
 
   const field = ([k, label]) => {
     const v = data[k] ?? '';
-    const type = DATE_FIELDS.has(k) ? 'date' : (k === 'email' || k === 'org_email' ? 'email' : (k === 'phone' || k === 'org_phone' ? 'tel' : 'text'));
+    const type = DATE_FIELDS.has(k) ? 'date' : (k.endsWith('email') ? 'email' : (k.endsWith('phone') ? 'tel' : 'text'));
     return `<label class="cf ${WIDE.has(k) ? 'wide' : ''} ${ocr.has(k) ? 'ocr' : ''}"><span>${esc(label)}</span>
-      <input type="${type}" data-f="${k}" value="${esc(v)}" placeholder="${esc(PH[k] || '')}" ${k === 'pass_series' || k === 'pass_number' || k === 'inn' || k === 'ogrn' || k === 'bik' ? 'inputmode="numeric"' : ''}></label>`;
+      <input type="${type}" data-f="${k}" value="${esc(v)}" placeholder="${esc(PH[k] || '')}" ${NUMERIC.has(k) ? 'inputmode="numeric"' : ''}></label>`;
   };
 
   function draw() {
     const kind = data.kind || 'person';
-    const common = st.fields.common.filter(([k]) => k !== 'advance');
+    const common = st.fields.common.filter(([k]) => !k.startsWith('design_'));
+    const design = st.fields.common.filter(([k]) => k.startsWith('design_'));
     body.innerHTML = `
       <section class="cs ocr-box"><h3>Распознать документ</h3>
-        <p class="small mute" style="margin:0 0 10px">Сфотографируйте разворот паспорта с фото${kind === 'person' ? ' и страницу с пропиской' : ''} или карточку реквизитов ИП/ООО — данные подставятся в договор. Можно выбрать до 4 фото сразу. Фото не сохраняется.</p>
-        ${st.ocr_ready ? `<label class="btn p upl">Фото документа<input type="file" accept="image/*" multiple data-ocr hidden></label> <span class="small mute" data-ocr-status></span>`
+        <p class="small mute" style="margin:0 0 10px">Сфотографируйте разворот паспорта с фото и страницу с пропиской или карточку реквизитов ИП/ООО — данные подставятся в договор. Можно выбрать до 4 фото сразу. Фото не сохраняется.</p>
+        ${st.ocr_ready ? `<label class="btn p upl">Фото документа<input type="file" accept="image/*,application/pdf" multiple data-ocr hidden></label> <span class="small mute" data-ocr-status></span>`
           : `<div class="infobox">Распознавание пока не подключено: на сервере нужен ключ ${st.ocr_provider === 'yandex' ? 'Yandex Vision (YANDEX_VISION_API_KEY и YANDEX_FOLDER_ID)' : 'OpenAI (OPENAI_API_KEY — тот же, что для накладных)'} в .env. Поля можно заполнить вручную.</div>`}
       </section>
       <section class="cs"><h3>Договор</h3>
         <div class="cf-line"><span>Тариф</span><div class="seg2" data-tariff>${TARIFFS.map(t => `<button type="button" data-v="${t}" class="${st.tariff === t ? 'on' : ''}">${TN[t]}</button>`).join('')}</div></div>
+        <div class="cf-line"><span>Материалы</span><div class="seg2" data-mat><button type="button" data-v="executor" class="${data.materials !== 'customer' ? 'on' : ''}">Исполнителя</button><button type="button" data-v="customer" class="${data.materials === 'customer' ? 'on' : ''}">Заказчика</button></div></div>
         <div class="cf-grid">${common.map(field).join('')}</div>
         <div data-sums></div>
       </section>
+      <section class="cs"><h3>Дизайн-проект — Приложение № ${st.numbers.M ? 3 : 2}</h3>
+        <p class="small mute" style="margin:0 0 10px">Необязательно. Если приложить PDF, на выбранные страницы встанет штамп «Приложение к договору», а в договоре появится пункт о работе по проекту. Без проекта — пункт о разметке на объекте.</p>
+        ${st.design ? `<div class="row" style="gap:8px;align-items:center;margin-bottom:10px"><b>PDF загружен</b><button type="button" class="btn s" data-design-del>Убрать</button></div>
+          <div class="cf-grid">${design.map(field).join('')}</div>`
+          : `<label class="btn upl">Загрузить PDF<input type="file" accept="application/pdf" data-design hidden></label> <span class="small mute" data-design-status></span>`}
+      </section>
       <section class="cs"><h3>Заказчик</h3>
-        <div class="cf-line"><span>Кто заказчик</span><div class="seg2" data-kind><button type="button" data-v="person" class="${kind === 'person' ? 'on' : ''}">Физлицо</button><button type="button" data-v="org" class="${kind === 'org' ? 'on' : ''}">ИП или ООО</button></div></div>
-        <div class="cf-grid">${(kind === 'person' ? st.fields.person : st.fields.org).map(field).join('')}</div>
+        <div class="cf-line"><span>Кто заказчик</span><div class="seg2" data-kind>${Object.entries(KIND_NAMES).map(([k, n]) => `<button type="button" data-v="${k}" class="${kind === k ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+        <div class="cf-grid">${(st.fields[kind] || st.fields.person).map(field).join('')}</div>
       </section>
       <div data-missing></div>`;
     body.querySelectorAll('input[data-f]').forEach(el => el.addEventListener('input', () => {
@@ -505,24 +517,36 @@ async function renderContract(main, id) {
       clearTimeout(saveT); await save(b.dataset.v);
     });
     body.querySelectorAll('[data-kind] button').forEach(b => b.onclick = () => { data.kind = b.dataset.v; draw(); schedule(100); });
+    body.querySelectorAll('[data-mat] button').forEach(b => b.onclick = async () => { data.materials = b.dataset.v; clearTimeout(saveT); await save(); draw(); });
     const up = body.querySelector('[data-ocr]');
     if (up) up.onchange = () => recognize([...up.files]);
+    const dz = body.querySelector('[data-design]');
+    if (dz) dz.onchange = async () => {
+      const f = dz.files[0]; if (!f) return;
+      body.querySelector('[data-design-status]').textContent = 'Загружаю…';
+      const form = new FormData(); form.append('file', f);
+      try { await flush(); st = await api.upload(`/api/estimates/${id}/contract/design`, form); data = st.data; draw(); drawBar(); toast('Дизайн-проект приложен'); }
+      catch (e) { body.querySelector('[data-design-status]').textContent = ''; toast(e.message, true); }
+    };
+    body.querySelector('[data-design-del]')?.addEventListener('click', async () => {
+      try { await flush(); st = await api.del(`/api/estimates/${id}/contract/design`); data = st.data; draw(); drawBar(); } catch (e) { toast(e.message, true); }
+    });
     drawSums(); drawMissing();
   }
 
   function drawSums() {
     const n = st.numbers;
     const el = body.querySelector('[data-sums]'); if (!el) return;
+    const w1 = n.works_sum - n.stage2_sum;
     el.innerHTML = `<dl class="dl2 sums">
-      <dt>Цена договора</dt><dd><b>${fmt(n.price)}</b>${n.tariff === 'basic' ? ' <span class="small mute">ориентировочно, по факту</span>' : ''}</dd>
-      <dt>Аванс</dt><dd><input type="number" inputmode="numeric" data-adv value="${data.advance ?? ''}" placeholder="${n.advance_default}"> <span class="small mute">по умолчанию — материалы, до тысяч</span></dd>
-      ${n.stage2 ? `<dt>Этап 2 (чистовая)</dt><dd>${fmt(n.stage2)} <span class="small mute">до ${n.mech} шт.</span></dd>` : ''}
-      <dt>Окончательный расчёт</dt><dd>${fmt(n.rest)}</dd>
-      <dt>Гарантия</dt><dd>${n.guarantee} мес.</dd>
+      <dt>${n.tariff === 'basic' ? 'Цена (ориентировочно, по факту)' : 'Цена договора'}</dt><dd><b>${fmtk(n.total)}</b></dd>
+      ${n.M ? `<dt>Платёж № 1 — аванс (материалы)</dt><dd>${fmtk(n.mat_sum)} <span class="small mute">3 дня после подписания</span></dd>
+      <dt>Платёж № 2 — работы</dt><dd>${fmtk(w1)} <span class="small mute">5 дней после акта</span></dd>`
+      : `<dt>Оплата</dt><dd>${fmtk(w1)} <span class="small mute">одним платежом после акта</span></dd>`}
+      ${n.stage2_sum ? `<dt>Платёж № ${n.M ? 3 : 2} — второй этап</dt><dd>${fmtk(n.stage2_sum)} <span class="small mute">чистовая установка, до ${n.mech} шт.</span></dd>` : ''}
+      <dt>Гарантия</dt><dd>${n.warranty} мес.</dd>
       <dt>Бесплатных изменений</dt><dd>${n.limit || '—'}</dd>
       <dt>Автоматика</dt><dd>${esc(n.brand)}</dd></dl>`;
-    const adv = el.querySelector('[data-adv]');
-    adv.oninput = () => { data.advance = adv.value === '' ? null : Number(adv.value); schedule(); };
   }
 
   function drawMissing() {
@@ -544,13 +568,13 @@ async function renderContract(main, id) {
       for (const [k, v] of Object.entries(f)) { if (k !== 'kind' && v) { data[k] = v; ocr.add(k); n++; } }
       draw(); schedule(100);
       const what = { passport: 'паспорт', registration: 'прописка', org: 'реквизиты', unknown: 'не распознано' };
-      body.querySelector('[data-ocr-status]').textContent = n ? `Подставлено полей: ${n} (${r.kinds.map(k => what[k]).join(', ')}) — проверьте подсвеченные` : 'Данных не нашлось';
+      body.querySelector('[data-ocr-status]').textContent = n ? `Подставлено полей: ${n}${r.kinds?.length ? ' (' + r.kinds.map(k => what[k] || k).join(', ') + ')' : ''} — проверьте подсвеченные` : 'Данных не нашлось';
       if (!n && r.text) openModal(`<h2>Распознанный текст</h2><p class="small mute">Поля определить не удалось — скопируйте нужное вручную.</p><pre class="ocr-text">${esc(r.text)}</pre><div class="actions"><button class="btn" data-cancel>Закрыть</button></div>`).querySelector('[data-cancel]').onclick = closeModal;
     } catch (e) { s.textContent = ''; toast(e.message, true); }
   }
 
   function drawBar() {
-    bar.innerHTML = `<div class="bar-prices"><span class="small mute">${TN[st.tariff]} · ${fmt(st.numbers.price)}</span></div>
+    bar.innerHTML = `<div class="bar-prices"><span class="small mute">${TN[st.tariff]} · ${fmtk(st.numbers.total)}</span></div>
       <div class="bar-acts">
         <button type="button" class="btn p" data-zip>Скачать пакет</button>
         <button type="button" class="btn" data-one>Файлы по одному</button>
@@ -562,8 +586,9 @@ async function renderContract(main, id) {
     bar.querySelector('[data-one]').onclick = async () => {
       await flush();
       const list = await api.get(`/api/estimates/${id}/contract/list`);
-      const m = openModal(`<h2>Документы</h2><p class="small mute">Word и Excel — открываются на iPad в «Файлах», печать оттуда.</p>
-        <div class="big">${list.map(f => `<button data-n="${esc(f.name)}">${esc(f.title)} <span class="small mute">${f.name.endsWith('.xlsx') ? 'Excel' : 'Word'}</span></button>`).join('')}</div>
+      const ext = (n) => n.endsWith('.xlsx') ? 'Excel' : (n.endsWith('.pdf') ? 'PDF' : 'Word');
+      const m = openModal(`<h2>Документы</h2><p class="small mute">Word, Excel и PDF — открываются на iPad в «Файлах», печать оттуда.</p>
+        <div class="big">${list.map(f => `<button data-n="${esc(f.name)}">${esc(f.title)} <span class="small mute">${ext(f.name)}</span></button>`).join('')}</div>
         <div class="actions"><button class="btn" data-cancel>Закрыть</button></div>`);
       m.querySelector('[data-cancel]').onclick = closeModal;
       m.querySelectorAll('[data-n]').forEach(b => b.onclick = async () => {

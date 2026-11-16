@@ -275,7 +275,9 @@ def _recognize_openai(images: list[tuple[bytes, str]]) -> dict:
     fields = clean_fields(out.get("fields") or {})
     kinds = [k if k in ("passport", "registration", "org") else "unknown" for k in (out.get("kinds") or [])][:len(images)]
     if any(k in fields for k in ("org_name", "ogrn", "account")) and not any(k in fields for k in ("fio", "pass_number")):
-        fields["kind"] = "org"
+        ip = len(fields.get("ogrn", "")) == 15 or len(fields.get("inn", "")) == 12 or \
+            re.match(r"(индивидуальный предприниматель|ип)\b", fields.get("org_name", ""), re.I)
+        fields["kind"] = "ip" if ip else "org"
     elif any(k in fields for k in ("fio", "pass_number", "reg_address")):
         fields["kind"] = "person"
     return {"fields": fields, "kinds": kinds, "text": ""}
@@ -313,7 +315,7 @@ def _recognize_yandex(images: list[tuple[bytes, str]]) -> dict:
         else:
             kinds.append("unknown")
     if "org" in kinds and "passport" not in kinds:
-        fields["kind"] = "org"
+        fields["kind"] = "ip" if len(fields.get("ogrn", "")) == 15 or len(fields.get("inn", "")) == 12 else "org"
     elif "passport" in kinds or "registration" in kinds:
         fields["kind"] = "person"
     return {"fields": fields, "kinds": kinds, "text": "\n\n".join(t for t in texts if t)}

@@ -1,70 +1,64 @@
-"""Пакет документов по расчёту: договор подряда от ИП (заказчик — физлицо или ИП/ООО), Приложение № 1 (смета),
-Приложение № 2 (спецификация), акт сдачи-приёмки, памятка с гарантийным талоном, две квитанции, щит для монтажника.
+# -*- coding: utf-8 -*-
+"""Пакет документов ИП Клемань К.В. по расчёту CRM — перенос генератора make_ip_docs.py (папка «Договоры_ИП/_генератор»,
+чат «Договоры от ИП»): договор (.docx), Приложение № 1 — смета работ (.xlsx), Приложение № 2 — спецификация материалов
+(.xlsx, если материалы Исполнителя), Приложение № 3 — дизайн-проект (PDF со штампом, если загружен), акт выполненных работ
+(.docx). Тексты договора и акта — как в генераторе; добавлено только то, что обещают тарифы в КП (помечено «тарифы КП»):
+«Базовый» — цена по факту; «Стандарт» / «Под ключ» — бесплатные изменения электроточек; «Под ключ» — второй этап
+(чистовая установка после отделки) с отдельным платежом и отдельным актом.
 
-Перенос сформировать_документы.py: те же шаблоны (contract_tpl/), те же правила подстановки по порядку мест [___].
-Отличия от скрипта: данные берутся из расчёта CRM, а не из листов Excel; в спецификацию щита попадают только
-аппараты и корпуса (в скрипте второй «note» на листе «СметаДанные» добавлял в щит строки условий тарифа);
-подпись представителя организации — отдельным полем.
-
-В шаблонах договора банковские реквизиты и адрес ИП заменены метками {{C_*}} (репозиторий публичный) —
-значения берутся из справочника «Реквизиты исполнителя» (CalcParam, раздел contractor).
+Реквизиты Исполнителя, которых нет в открытом доступе (адрес, р/с, телефон, e-mail), — в справочнике CRM
+(CalcParam, раздел contractor): репозиторий публичный.
 """
+import calendar
 import io
 import os
 import re
 import zipfile
-from copy import copy
-from datetime import date, timedelta
+from datetime import date
 
 from . import calc
 
-TPL = os.path.join(os.path.dirname(__file__), "contract_tpl")
-GUAR = {"basic": 12, "std": 36, "turnkey": 60}
-LIMIT = {"basic": 0, "std": 3, "turnkey": 8}
-CONTRACTOR_KEYS = {"C_ADDRESS": "contractor.address", "C_ACCOUNT": "contractor.account", "C_BANK": "contractor.bank",
-                   "C_CORR": "contractor.corr", "C_BIK": "contractor.bik"}
+FONT = "Times New Roman"
+FONT_TTF = os.path.join(os.path.dirname(__file__), "fonts", "LiberationSerif-Regular.ttf")
+VAT = "НДС не облагается в связи с применением Исполнителем патентной системы налогообложения (п. 11 ст. 346.43 НК РФ)"
+EXEC_PUBLIC = {"full": "Индивидуальный предприниматель Клемань Константин Владиславович",
+               "short": "ИП Клемань Константин Владиславович", "sign": "Клемань К.В.",
+               "ogrnip": "321392600006563", "ogrnip_date": "10.02.2021", "inn": "392302333809"}
+CONTRACTOR_KEYS = {"address": ("contractor.address", "адрес"), "rs": ("contractor.account", "расчётный счёт"),
+                   "bank": ("contractor.bank", "банк"), "ks": ("contractor.corr", "корр. счёт"), "bik": ("contractor.bik", "БИК"),
+                   "phone": ("contractor.phone", "телефон"), "email": ("contractor.email", "e-mail")}
+GUAR = {"basic": 12, "std": 36, "turnkey": 60}     # гарантия по тарифу — как в КП
+LIMIT = {"basic": 0, "std": 3, "turnkey": 8}       # бесплатные изменения электроточек — как в КП
 
-# поля договора: (ключ, подпись) — для формы и проверки заполненности
+# поля формы договора: (ключ, подпись)
 PERSON_FIELDS = [("fio", "Фамилия Имя Отчество"), ("birth", "Дата рождения"), ("pass_series", "Паспорт: серия"),
                  ("pass_number", "Паспорт: номер"), ("pass_issued", "Паспорт: кем выдан"), ("pass_date", "Паспорт: дата выдачи"),
                  ("pass_code", "Паспорт: код подразделения"), ("reg_address", "Адрес регистрации"),
                  ("phone", "Телефон / WhatsApp"), ("email", "E-mail")]
-ORG_FIELDS = [("org_name", "Полное наименование / ИП ФИО"), ("ogrn", "ОГРН / ОГРНИП"), ("inn", "ИНН"), ("kpp", "КПП (для ООО)"),
-              ("legal_address", "Юридический адрес"), ("signer", "В лице (должность, ФИО)"), ("basis", "Действует на основании"),
-              ("sign_name", "Подпись: Фамилия И.О."), ("account", "Расчётный счёт"), ("bank", "Банк"), ("corr", "Корр. счёт"),
-              ("bik", "БИК"), ("org_phone", "Телефон"), ("org_email", "E-mail")]
-COMMON_FIELDS = [("number", "Номер договора"), ("date", "Дата договора"), ("address", "Адрес объекта"),
-                 ("start", "Ориентировочная дата начала"), ("end", "Дата окончания работ"), ("advance", "Аванс, ₽")]
-OPTIONAL = {"email", "org_email", "kpp", "advance", "sign_name", "birth"}
+ORG_FIELDS = [("org_name", "Полное наименование"), ("ogrn", "ОГРН / ОГРНИП"), ("inn", "ИНН"), ("kpp", "КПП"),
+              ("legal_address", "Адрес (юридический / регистрации ИП)"), ("signer", "В лице (должность, ФИО — в родительном падеже)"),
+              ("basis", "Действует на основании"), ("sign_name", "Подпись: Фамилия И.О."), ("account", "Расчётный счёт"),
+              ("bank", "Банк"), ("corr", "Корр. счёт"), ("bik", "БИК"), ("org_phone", "Телефон"), ("org_email", "E-mail")]
+IP_SKIP = {"kpp", "signer", "basis"}               # у заказчика-ИП нет КПП и подписывает он сам
+COMMON_FIELDS = [("number", "Номер договора"), ("date", "Дата договора"), ("end", "Срок окончания работ"),
+                 ("address", "Адрес объекта"), ("design_sheets", "Дизайн-проект: какие листы (если прикладываете PDF)"),
+                 ("design_pages", "Страницы PDF для приложения (например: 9-11), пусто — все")]
+OPTIONAL = {"email", "org_email", "kpp", "birth", "design_sheets", "design_pages", "sign_name"}
 
-# ---------- сумма прописью ----------
-_U = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять", "одиннадцать",
-      "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"]
-_UF = ["", "одна", "две"]
-_T = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"]
-_H = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"]
+
+# ---------------------------------------------------------------- числа и даты (rusnum.py)
+UNITS_M = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
+UNITS_F = ["", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
+TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать",
+         "восемнадцать", "девятнадцать"]
+TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"]
+HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"]
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
-
-
-def _triad(n, fem=False):
-    w = []
-    h, r = divmod(n, 100)
-    if h:
-        w.append(_H[h])
-    if r < 20:
-        if r:
-            w.append(_UF[r] if fem and r < 3 else _U[r])
-    else:
-        t, u = divmod(r, 10)
-        w.append(_T[t])
-        if u:
-            w.append(_UF[u] if fem and u < 3 else _U[u])
-    return " ".join(w)
 
 
 def plural(n, forms):
     n = abs(int(n)) % 100
-    if 10 < n < 20:
+    if 11 <= n <= 19:
         return forms[2]
     n %= 10
     if n == 1:
@@ -74,44 +68,81 @@ def plural(n, forms):
     return forms[2]
 
 
-def num2words(n) -> str:
-    n = int(calc.xround(n))
+def _triad(n, fem):
+    w = []
+    h, r = divmod(n, 100)
+    if h:
+        w.append(HUNDREDS[h])
+    if 10 <= r <= 19:
+        w.append(TEENS[r - 10])
+    else:
+        t, u = divmod(r, 10)
+        if t:
+            w.append(TENS[t])
+        if u:
+            w.append((UNITS_F if fem else UNITS_M)[u])
+    return w
+
+
+def words(n: int) -> str:
+    n = int(n)
     if n == 0:
         return "ноль"
     parts = []
-    for base, forms, fem in [(10 ** 9, ("миллиард", "миллиарда", "миллиардов"), False),
+    for size, forms, fem in [(10 ** 9, ("миллиард", "миллиарда", "миллиардов"), False),
                              (10 ** 6, ("миллион", "миллиона", "миллионов"), False),
                              (10 ** 3, ("тысяча", "тысячи", "тысяч"), True)]:
-        q, n = divmod(n, base)
+        q, n = divmod(n, size)
         if q:
-            parts.append(_triad(q, fem) + " " + plural(q, forms))
-    if n:
-        parts.append(_triad(n))
+            parts += _triad(q, fem) + [plural(q, forms)]
+    parts += _triad(n, False)
     return " ".join(parts)
 
 
-def rub_words(n) -> str:
-    n = int(calc.xround(n))
-    return fmt_money(n) + " (" + num2words(n) + ") " + plural(n, ("рубль", "рубля", "рублей"))
+def fmt_int(n) -> str:
+    return f"{int(n):,}".replace(",", " ")
 
 
-def fmt_money(n) -> str:
-    return f"{int(calc.xround(n)):,}".replace(",", " ")
+def money(amount) -> str:
+    """310573.81 → «310 573 (триста десять тысяч пятьсот семьдесят три) рубля 81 копейка»"""
+    rub, kop = divmod(round(amount * 100), 100)
+    return (f"{fmt_int(rub)} ({words(rub)}) {plural(rub, ('рубль', 'рубля', 'рублей'))} "
+            f"{kop:02d} {plural(kop, ('копейка', 'копейки', 'копеек'))}")
+
+
+def money_short(amount) -> str:
+    rub, kop = divmod(round(amount * 100), 100)
+    return f"{fmt_int(rub)},{kop:02d} руб."
+
+
+def date_long(d: date) -> str:
+    return f"«{d.day:02d}» {MONTHS[d.month - 1]} {d.year} г."
+
+
+def date_text(d: date) -> str:
+    return f"{d.day} {MONTHS[d.month - 1]} {d.year} г."
+
+
+def add_month(d: date, m: int = 1) -> date:
+    y, mo = divmod(d.month - 1 + m, 12)
+    y += d.year
+    mo += 1
+    return date(y, mo, min(d.day, calendar.monthrange(y, mo)[1]))
 
 
 def parse_date(s) -> date | None:
     if isinstance(s, date):
         return s
     s = str(s or "").strip()
-    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s) or None
-    if m:
-        return date(int(m[1]), int(m[2]), int(m[3]))
-    m = re.fullmatch(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", s)
-    if m:
-        try:
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
+    try:
+        if m:
+            return date(int(m[1]), int(m[2]), int(m[3]))
+        m = re.fullmatch(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", s)
+        if m:
             return date(int(m[3]), int(m[2]), int(m[1]))
-        except ValueError:
-            return None
+    except ValueError:
+        return None
     return None
 
 
@@ -120,200 +151,981 @@ def fmt_date(s) -> str:
     return d.strftime("%d.%m.%Y") if d else str(s or "")
 
 
-def date_words(s) -> str | None:
-    d = parse_date(s)
-    return f"«{d.day:02d}» {MONTHS[d.month - 1]} {d.year} г." if d else None
-
-
-def short_fio(fio) -> str:
+def short_name(fio) -> str:
     p = str(fio or "").split()
-    if not p:
-        return "[___]"
-    return p[0] + " " + "".join(x[0] + "." for x in p[1:3])
+    return p[0] + " " + "".join(x[0] + "." for x in p[1:3]) if len(p) >= 2 else (fio or "[___]")
 
 
-# ---------- суммы договора из расчёта ----------
-def numbers(res: dict, tariff: str, advance=None) -> dict:
-    """Как лист «Договор»: цена = итог сметы до рубля, аванс = материалы до тысяч, этап 2 = чистовая (Под ключ)."""
+def mwords(n) -> str:
+    return f"{n} ({words(n)})"
+
+
+def num_fmt(v) -> str:
+    return f"{v:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def qty_fmt(v) -> str:
+    if abs(v - round(v)) < 1e-9:
+        return str(int(round(v)))
+    return f"{v:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def line_sum(x) -> float:
+    return round(x["qty"] * x["price"], 2)
+
+
+# ---------------------------------------------------------------- данные из расчёта
+CLEAN_NAME = [(r"\s*\(с запасом\)", ""), (r"\s*\(пачек\)", ""), (r"\s*\(упак\.\)", "")]
+
+
+def _item(ln: dict) -> dict:
+    name = ln["name"]
+    for a, b in CLEAN_NAME:
+        name = re.sub(a, b, name)
+    unit = ln.get("unit") or ("компл." if re.search(r"вынос|расходн", name, re.I) else "шт")
+    return {"name": name, "qty": calc.shown(ln["qty"]), "unit": unit, "price": calc.shown(ln["price"])}
+
+
+def numbers(res: dict, tariff: str, materials: str = "executor") -> dict:
+    """Работы и материалы для документов: строки сметы CRM в напечатанном виде (кол-во и цена до копеек).
+    Цена договора = работы + материалы = цена в КП."""
     sm = calc.smeta(res, tariff)
-    by = {s["title"].split(". ", 1)[-1]: s for s in sm["sections"]}
-    works = by["Работы"]["total"]
-    mats = by["Материалы"]["total"]
-    cond = by["Условия тарифа"]["total"]
-    fin = by["Чистовая установка после отделки (этап 2)"]["total"] if tariff == "turnkey" else 0.0
-    # цена = сумма строк Приложения № 1 в том виде, как они напечатаны (кол-во и цена до копеек), до рубля —
-    # чтобы итог сметы сходился со строками; от итога «СметаДанные» в Excel отличается на 1–3 ₽
-    price = calc.smeta_price(sm)     # = цена в КП
-    adv_default = calc.xround(mats, -3)
-    adv = adv_default if advance in (None, "") else calc.xround(calc.num(advance))
-    fin = calc.xround(fin)
-    mech = int(sum(f["qty"] for f in res["finishing"])) if tariff == "turnkey" else 0
-    return {"tariff": tariff, "tariff_name": calc.TARIFF_NAMES[tariff], "price": price, "works": works, "materials": mats,
-            "conditions": cond, "advance": adv, "advance_default": adv_default, "stage2": fin, "rest": price - adv - fin,
-            "guarantee": GUAR[tariff], "limit": LIMIT[tariff], "mech": mech, "brand": res["inputs"]["brand"],
-            "smeta": sm}
-
-
-_q = _p = calc.shown
+    sec = {s["title"].split(". ", 1)[-1]: s for s in sm["sections"]}
+    stage1 = [_item(x) for x in sec["Работы"]["lines"]]
+    stage2 = [_item(x) for x in sec["Чистовая установка после отделки (этап 2)"]["lines"]] if tariff == "turnkey" else []
+    cond = [_item(x) for x in sec["Условия тарифа"]["lines"]]
+    m = sec["Материалы"]
+    brand = res["inputs"]["brand"]
+    mats = [_item(x) for x in m["lines"]]
+    panel = [_item(x) for x in m.get("panel", [])]
+    if panel:
+        mats += [{"section": f"Электрощит и автоматика {brand}"}] + panel
+    M = materials != "customer"
+    works = stage1 + cond + stage2
+    works_sum = round(sum(line_sum(w) for w in works), 2)
+    stage2_sum = round(sum(line_sum(w) for w in stage2), 2)
+    mat_sum = round(sum(line_sum(x) for x in mats if "section" not in x), 2) if M else 0.0
+    return {"tariff": tariff, "tariff_name": calc.TARIFF_NAMES[tariff], "works": works, "stage2": stage2,
+            "materials_list": mats if M else [], "M": M, "works_sum": works_sum, "stage2_sum": stage2_sum,
+            "mat_sum": mat_sum, "total": round(works_sum + mat_sum, 2), "warranty": GUAR[tariff], "limit": LIMIT[tariff],
+            "mech": int(sum(w["qty"] for w in stage2)), "brand": brand}
 
 
 def default_data(lead=None, inputs: dict | None = None, today: date | None = None) -> dict:
     t = today or date.today()
-    return {"kind": "person", "number": t.strftime("%d%m/%y"), "date": t.isoformat(),
-            "start": (t + timedelta(days=7)).isoformat(), "end": (t + timedelta(days=28)).isoformat(),
+    return {"kind": "person", "number": t.strftime("%d%m/%y"), "date": t.isoformat(), "end": add_month(t, 1).isoformat(),
             "address": (getattr(lead, "address", None) or (inputs or {}).get("object") or ""),
-            "phone": getattr(lead, "phone", None) or "", "basis": "Устава", "advance": None}
+            "phone": getattr(lead, "phone", None) or "", "materials": "executor", "basis": "Устава"}
 
 
-def missing(data: dict, contractor: dict) -> list[str]:
-    """Что не заполнено — в документах останутся места [___]."""
+def form_fields(kind: str) -> list:
+    if kind == "person":
+        return PERSON_FIELDS
+    return [f for f in ORG_FIELDS if not (kind == "ip" and f[0] in IP_SKIP)]
+
+
+def missing(data: dict, contractor: dict, has_design: bool = False) -> list[str]:
     out = []
-    fields = COMMON_FIELDS + (PERSON_FIELDS if data.get("kind", "person") == "person" else ORG_FIELDS)
-    for k, label in fields:
+    for k, label in COMMON_FIELDS + form_fields(data.get("kind", "person")):
         if k not in OPTIONAL and not str(data.get(k) or "").strip():
             out.append(label)
-    for tok, key in CONTRACTOR_KEYS.items():
+    if has_design and not str(data.get("design_sheets") or "").strip():
+        out.append("Дизайн-проект: какие листы")
+    for key, label in CONTRACTOR_KEYS.values():
         if not (contractor.get(key) or "").strip():
-            out.append("Реквизиты исполнителя: " + {"C_ADDRESS": "адрес", "C_ACCOUNT": "расчётный счёт", "C_BANK": "банк",
-                                                    "C_CORR": "корр. счёт", "C_BIK": "БИК"}[tok])
+            out.append("Реквизиты исполнителя: " + label)
     return out
 
 
-# ---------- docx ----------
-PH = re.compile(r"\[[^\[\]]*(?:\[___\][^\[\]]*)?\]")   # [___], [текст], а также [текст … [___]]
-DATE = re.compile(r"«___»(?:</w:t>.*?<w:t[^>]*>)?\s*_+\s*(?:</w:t>.*?<w:t[^>]*>)?20___ г\.", re.S)
+def object_for(N: dict, data: dict, contractor: dict, has_design: bool) -> dict:
+    """Объект в формате генератора make_ip_docs.py."""
+    g = lambda k, d="[___]": str(data.get(k)).strip() if str(data.get(k) or "").strip() else d  # noqa: E731
+    d0 = parse_date(data.get("date")) or date.today()
+    kind = data.get("kind", "person")
+    if kind == "person":
+        fio = g("fio")
+        issued = ", ".join(x for x in [g("pass_issued", ""), (fmt_date(data["pass_date"]) + " г.") if data.get("pass_date") else "",
+                                       ("код подразделения " + g("pass_code", "")) if data.get("pass_code") else ""] if x)
+        cust = {"type": "fl", "fio": fio, "short": short_name(data.get("fio")) if data.get("fio") else "[___]",
+                "birth": fmt_date(data.get("birth")) if data.get("birth") else "",
+                "passport": f"{g('pass_series', '')} {g('pass_number', '')}".strip() or "[___]", "passport_issued": issued,
+                "address": g("reg_address"), "phone": g("phone"), "email": str(data.get("email") or "").strip(),
+                "female": fio.strip().endswith(("вна", "чна", "кызы")), "neutral": fio == "[___]"}
+    else:
+        signer = " ".join(str(data.get("signer") or "").split())
+        sign_name = str(data.get("sign_name") or "").strip()
+        if kind == "ip":
+            org = g("org_name")
+            if org != "[___]" and not re.match(r"(индивидуальный предприниматель|ип)\b", org, re.I):
+                org = "Индивидуальный предприниматель " + org
+            sign_name = sign_name or short_name(re.sub(r"^(индивидуальный предприниматель|ип)\s+", "", org, flags=re.I))
+        else:
+            org = g("org_name", "[Наименование]")
+            sign_name = sign_name or (short_name(" ".join(signer.split()[-3:])) if len(signer.split()) >= 3 else "[___]")
+        cust = {"type": "org", "is_ip": kind == "ip", "name": org, "inn": g("inn"), "kpp": str(data.get("kpp") or "").strip(),
+                "ogrn": g("ogrn"), "address": g("legal_address"), "rs": g("account"), "bank": g("bank"), "ks": g("corr"),
+                "bik": g("bik"), "phone": g("org_phone"), "email": str(data.get("org_email") or "").strip(),
+                "named": "именуемый" if kind == "ip" else "именуемое", "signer_short": sign_name,
+                "signer_line": (f"{signer}, действующего на основании {g('basis', 'Устава')}" if signer else
+                                "[должность, ФИО], действующего на основании [___]")}
+    o = {"num": g("number", "___"), "date_d": d0, "end_d": parse_date(data.get("end")) or add_month(d0, 1),
+         "customer": cust, "object_address": g("address", "[адрес Объекта]"), "FL": kind == "person", **N}
+    o["app_mat"] = 2 if o["M"] else None
+    o["app_design"] = (3 if o["M"] else 2) if has_design else None
+    if has_design:
+        o["design"] = {"sheets": g("design_sheets", "[листы]"), "pages": parse_pages(data.get("design_pages"))}
+    cust25 = calc.num(N.get("cust_cable25"))
+    if cust25:
+        o["customer_materials"] = [{"name": "кабель ВВГнг-LS 3×2,5", "qty": cust25, "unit": "м"}]
+    e = dict(EXEC_PUBLIC)
+    for k, (key, _) in CONTRACTOR_KEYS.items():
+        e[k] = (contractor.get(key) or "").strip() or "[___]"
+    o["EXEC"] = e
+    return o
 
 
-def esc(s) -> str:
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def parse_pages(s) -> list[int] | None:
+    out = []
+    for part in re.split(r"[,;\s]+", str(s or "").strip()):
+        m = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if m:
+            a, b = int(m[1]), int(m[2] or m[1])
+            out += list(range(a, b + 1)) if 0 < a <= b <= 500 else []
+    return out or None
 
 
-def fill_docx(name: str, ph_values, date_values=(), extra=(), contractor: dict | None = None, footer_num: str | None = None) -> bytes:
-    """ph_values — значения по порядку мест [..] (None — оставить как есть); date_values — то же для «___» ____ 20___ г.;
-    extra — замены текста (значения уже экранированы)."""
-    src = os.path.join(TPL, name)
+# ---------------------------------------------------------------- docx helpers
+def _docx():
+    from docx import Document
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt
+    return Document, WD_TABLE_ALIGNMENT, WD_ALIGN_PARAGRAPH, OxmlElement, qn, Cm, Pt
+
+
+def base_doc():
+    Document, _, WD_ALIGN_PARAGRAPH, OxmlElement, qn, Cm, Pt = _docx()
+    d = Document()
+    s = d.styles["Normal"]
+    s.font.name = FONT
+    s.font.size = Pt(10.5)
+    s.element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
+    pf = s.paragraph_format
+    pf.space_after = Pt(2)
+    pf.space_before = Pt(0)
+    pf.line_spacing = 1.0
+    for sec in d.sections:
+        sec.page_height = Cm(29.7)
+        sec.page_width = Cm(21)
+        sec.left_margin = Cm(2)
+        sec.right_margin = Cm(1.5)
+        sec.top_margin = Cm(1.5)
+        sec.bottom_margin = Cm(1.5)
+    p = d.sections[0].footer.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r = p.add_run()
+    for t, txt in (("begin", None), (None, "PAGE"), ("end", None)):
+        if t:
+            e = OxmlElement("w:fldChar")
+            e.set(qn("w:fldCharType"), t)
+        else:
+            e = OxmlElement("w:instrText")
+            e.set(qn("xml:space"), "preserve")
+            e.text = txt
+        r._r.append(e)
+    r.font.size = Pt(8)
+    return d
+
+
+def para(d, text="", bold=False, align="j", size=None, indent=False, after=None, keep=False):
+    _, _, WD_ALIGN_PARAGRAPH, _, _, Cm, Pt = _docx()
+    p = d.add_paragraph()
+    if align == "j" and "_____" in text:
+        align = "l"
+    p.alignment = {"j": WD_ALIGN_PARAGRAPH.JUSTIFY, "c": WD_ALIGN_PARAGRAPH.CENTER,
+                   "l": WD_ALIGN_PARAGRAPH.LEFT, "r": WD_ALIGN_PARAGRAPH.RIGHT}[align]
+    if indent:
+        p.paragraph_format.first_line_indent = Cm(0.75)
+    if after is not None:
+        p.paragraph_format.space_after = Pt(after)
+    if keep:
+        p.paragraph_format.keep_with_next = True
+    for i, chunk in enumerate(re.split(r"\*\*", text)):      # **жирный**
+        if not chunk:
+            continue
+        r = p.add_run(chunk)
+        r.bold = bold or (i % 2 == 1)
+        if size:
+            r.font.size = Pt(size)
+    return p
+
+
+def tab_line(d, left, right):
+    _, _, _, _, _, Cm, _ = _docx()
+    p = d.add_paragraph()
+    p.paragraph_format.tab_stops.add_tab_stop(Cm(17.5), alignment=2)
+    p.add_run(left + "\t" + right)
+    return p
+
+
+def set_cell_border(table):
+    _, _, _, OxmlElement, qn, _, _ = _docx()
+    borders = OxmlElement("w:tblBorders")
+    for b in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        e = OxmlElement(f"w:{b}")
+        e.set(qn("w:val"), "single")
+        e.set(qn("w:sz"), "4")
+        e.set(qn("w:color"), "000000")
+        borders.append(e)
+    table._tbl.tblPr.append(borders)
+
+
+def cell_text(cell, lines, bold_first=False, size=10, align="l"):
+    _, _, WD_ALIGN_PARAGRAPH, _, _, _, Pt = _docx()
+    cell.paragraphs[0].text = ""
+    for i, ln in enumerate(lines):
+        p = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+        p.paragraph_format.space_after = Pt(0)
+        p.alignment = {"l": WD_ALIGN_PARAGRAPH.LEFT, "c": WD_ALIGN_PARAGRAPH.CENTER, "r": WD_ALIGN_PARAGRAPH.RIGHT}[align]
+        r = p.add_run(ln)
+        r.font.size = Pt(size)
+        if bold_first and i == 0:
+            r.bold = True
+
+
+# ---------------------------------------------------------------- реквизиты
+def exec_lines(o):
+    e = o["EXEC"]
+    return ["ИСПОЛНИТЕЛЬ", e["short"], f"ИНН {e['inn']}", f"ОГРНИП {e['ogrnip']}", f"Адрес: {e['address']}",
+            f"р/с {e['rs']}", f"в {e['bank']}", f"к/с {e['ks']}", f"БИК {e['bik']}", f"Тел.: {e['phone']}", f"E-mail: {e['email']}"]
+
+
+def cust_lines(o):
+    c = o["customer"]
+    if o["FL"]:
+        L = ["ЗАКАЗЧИК", c["fio"]]
+        if c.get("birth"):
+            L.append(f"Дата рождения: {c['birth']}")
+        pas = f"Паспорт: {c.get('passport', '[___]')}"
+        if c.get("passport_issued"):
+            pas += f", выдан {c['passport_issued']}"
+        L += [pas, f"Адрес регистрации: {c.get('address', '[___]')}", f"Тел.: {c.get('phone', '[___]')}"]
+        if c.get("email"):
+            L.append(f"E-mail: {c['email']}")
+        return L
+    L = ["ЗАКАЗЧИК", c.get("name", "[Наименование]"),
+         f"ИНН {c.get('inn', '[___]')}" + (f" / КПП {c['kpp']}" if c.get("kpp") else ""),
+         f"{'ОГРНИП' if c.get('is_ip') else 'ОГРН'} {c.get('ogrn', '[___]')}",
+         *([f"Адрес: {c['address']}"] if c.get("address", "[___]") else []),
+         f"р/с {c.get('rs', '[___]')}", f"в {c.get('bank', '[___]')}", f"к/с {c.get('ks', '[___]')}", f"БИК {c.get('bik', '[___]')}",
+         f"Тел.: {c.get('phone', '[___]')}"]
+    if c.get("email"):
+        L.append(f"E-mail: {c['email']}")
+    return L
+
+
+def cust_sign(o):
+    c = o["customer"]
+    return c["short"] if o["FL"] else c.get("signer_short", "[___]")
+
+
+def sign_table(d, o, with_reqs=True):
+    _, WD_TABLE_ALIGNMENT, _, _, _, Cm, _ = _docx()
+    t = d.add_table(rows=2 if with_reqs else 1, cols=2)
+    t.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for row in t.rows:
+        row.cells[0].width = Cm(8.75)
+        row.cells[1].width = Cm(8.75)
+    i = 0
+    if with_reqs:
+        cell_text(t.rows[0].cells[0], exec_lines(o), bold_first=True, size=9.5)
+        cell_text(t.rows[0].cells[1], cust_lines(o), bold_first=True, size=9.5)
+        i = 1
+    cell_text(t.rows[i].cells[0], ["", "Исполнитель", "", f"____________________ / {o['EXEC']['sign']} /"], size=10)
+    cell_text(t.rows[i].cells[1], ["", "Заказчик", "", f"____________________ / {cust_sign(o)} /", "" if o["FL"] else "М.П."], size=10)
+
+
+def obj_contract(o):
+    return f"на объекте, расположенном по адресу: {o['object_address']}"
+
+
+def obj_line(o):
+    return f"Адрес объекта: {o['object_address']}"
+
+
+# ---------------------------------------------------------------- договор: текст (make_ip_docs.contract_sections + тарифы КП)
+def contract_sections(o):
+    c = o["customer"]
+    M = o["M"]
+    FL = o["FL"]
+    AD = o["app_design"]
+    AM = o["app_mat"]
+    T = o["tariff"]
+    has_email = bool(c.get("email"))
+    pay2_name = "Платежа № 2" if M else "оплаты"
+    CM = "; ".join((f"{x['name']} — {qty_fmt(x['qty'])} {x['unit']}" if x.get("qty") else x["name"]) for x in o.get("customer_materials", []))
+    S = []
+
+    S.append(("ПРЕДМЕТ ДОГОВОРА", [
+        f"Исполнитель обязуется по заданию Заказчика выполнить электромонтажные работы (далее — «Работы») {obj_contract(o)} "
+        f"(далее — «Объект»), а Заказчик обязуется создать Исполнителю "
+        f"необходимые условия для выполнения Работ, принять их результат и оплатить его. Перечень, объём и стоимость Работ "
+        f"указаны в Смете работ (Приложение № 1).",
+        ("mat",
+         f"Работы выполняются силами и средствами Исполнителя из его материалов (ст. 704 ГК РФ). Перечень, количество и стоимость "
+         f"материалов, изделий и оборудования, используемых при выполнении Работ, указаны в Спецификации материалов "
+         f"(Приложение № {AM}); их стоимость входит в Цену Договора. Применяемые материалы соответствуют требованиям ГОСТ "
+         f"и имеют документы, подтверждающие их качество (сертификаты или декларации соответствия)."
+         if M else
+         "Работы выполняются силами и инструментом Исполнителя из материалов Заказчика (ст. 704, 713 ГК РФ). Заказчик обеспечивает "
+         "наличие на Объекте материалов, изделий и оборудования в количестве и ассортименте, согласованных с Исполнителем, "
+         "до начала соответствующего этапа Работ. Исполнитель обязан экономно расходовать материалы Заказчика и после "
+         "окончания Работ передать Заказчику их остаток."),
+    ] + ([("custmat",
+           "Часть материалов для выполнения Работ предоставляет Заказчик (ст. 704, 713 ГК РФ): " + CM + ". Заказчик обеспечивает "
+           "их наличие на Объекте до начала соответствующего этапа Работ. Исполнитель обязан экономно расходовать материалы "
+           "Заказчика, немедленно предупредить Заказчика об их непригодности или недоброкачественности и после окончания Работ "
+           "передать Заказчику их остаток.")] if CM else []) + [
+        ("design",
+         f"Работы выполняются в соответствии с дизайн-проектом ({o['design'].get('sheets', '')}), являющимся Приложением № {AD} "
+         f"к Договору. Высотные отметки и привязки, не указанные в проекте или обозначенные в нём «уточнить по месту», "
+         f"согласуются Сторонами в порядке п. {{notice}}. Дизайн-проект определяет расположение электроточек; состав и объём "
+         f"Работ определяются исключительно Сметой (Приложение № 1). Работы, предусмотренные проектом, но не указанные в Смете "
+         f"(в том числе монтаж светильников, светодиодной подсветки и её блоков питания, систем тёплого пола), в предмет "
+         f"Договора не входят и выполняются по отдельному соглашению Сторон."
+         if AD else
+         "Расположение электроустановочных изделий, выводов и светильников согласовано Сторонами на Объекте и обозначено "
+         "разметкой на стенах и потолке; количество электроточек указано в Смете (Приложение № 1). В день разметки Исполнитель "
+         "направляет Заказчику её фотографии в порядке п. {notice}. Если в течение 1 (одного) рабочего дня Заказчик не сообщит "
+         "о необходимости изменений, разметка считается подтверждённой. Перенос или добавление электроточек после этого "
+         "выполняется как дополнительные работы в порядке п. {extra}."),
+        ("norms_dev",
+         ("Если решения проекта или указания Заказчика противоречат" if AD else "Если указания Заказчика противоречат") +
+         " ПУЭ или СП 256.1325800.2016, Исполнитель уведомляет об этом "
+         "Заказчика в порядке п. {notice} и выполняет соответствующую часть Работ в соответствии с указанными нормами."),
+        "Работы выполняются в соответствии с Правилами устройства электроустановок (ПУЭ, 7-е изд.), СП 256.1325800.2016, "
+        "ГОСТ Р 50571, условиями Договора и Приложений к нему.",
+        ("subs", "Исполнитель вправе привлекать к выполнению Работ своих сотрудников и третьих лиц, оставаясь ответственным перед "
+         "Заказчиком за результат Работ и за действия привлечённых лиц (ст. 706 ГК РФ)."),
+    ]))
+
+    if T == "basic":     # тарифы КП: «Базовый» — по факту
+        price = [f"Ориентировочная Цена Договора по Смете составляет {money(o['total'])}, {VAT}."
+                 + (f" Она включает стоимость Работ по Приложению № 1 — {money_short(o['works_sum'])} и стоимость "
+                    f"материалов по Приложению № {AM} — {money_short(o['mat_sum'])}" if M else ""),
+                 "Окончательная Цена Договора определяется по фактически выполненному объёму Работ и фактически использованным "
+                 "материалам по расценкам Приложений к Договору и указывается в Акте выполненных работ (п. 3 ст. 709 ГК РФ). "
+                 "Дополнительные работы, не предусмотренные Сметой, выполняются только после согласования с Заказчиком."]
+    else:
+        price = [f"Цена Договора составляет {money(o['total'])}, {VAT}."
+                 + (f" Цена Договора включает стоимость Работ по Приложению № 1 — {money_short(o['works_sum'])} и стоимость "
+                    f"материалов по Приложению № {AM} — {money_short(o['mat_sum'])}" if M else ""),
+                 "Цена Договора является твёрдой (ст. 709 ГК РФ) и может быть изменена только при изменении состава или объёма "
+                 "Работ по дополнительному соглашению, подписанному Сторонами. Дополнительные работы выполняются только "
+                 "после подписания такого соглашения."]
+    acc = ("с даты приёмки Работ, то есть с даты подписания Акта выполненных работ Сторонами либо с даты составления "
+           "Исполнителем одностороннего Акта в порядке п. {onesided}")
+    st2 = o["stage2_sum"]
+    w2 = round(o["works_sum"] - st2, 2)
+    if M:
+        price.append(("pay", "Оплата производится в " + ("три платежа:" if st2 else "два платежа:")))
+        pays = [f"Платёж № 1 (аванс) в размере {money(o['mat_sum'])} — в течение 3 (трёх) календарных дней с даты подписания Договора;",
+                (f"Платёж № 2 в размере {money(w2)}" if T != "basic" else "Платёж № 2 в размере стоимости фактически выполненных Работ по Акту")
+                + f" — в течение 5 (пяти) календарных дней {acc}" + (";" if st2 else ".")]
+        if st2:
+            pays.append(f"Платёж № 3 в размере {money(st2)} (второй этап, п. {{stage2}}) — в течение 5 (пяти) календарных дней "
+                        f"с даты приёмки Работ второго этапа в том же порядке.")
+        price.append(("list", pays))
+    else:
+        price.append(("pay", f"Оплата производится единовременно в размере Цены Договора{' за вычетом стоимости второго этапа' if st2 else ''} в течение 5 (пяти) календарных дней {acc}."
+                      + (f" Стоимость Работ второго этапа (п. {{stage2}}) — {money(st2)} — оплачивается в том же порядке после их приёмки."
+                         if st2 else "")))
+    if FL:
+        price.append("Оплата производится наличными денежными средствами или путём перевода денежных средств на расчётный счёт "
+                     "Исполнителя, указанный в разделе {req}. Обязанность Заказчика по оплате считается исполненной с момента "
+                     "передачи наличных денежных средств Исполнителю либо зачисления денежных средств на расчётный счёт Исполнителя.")
+    else:
+        price.append("Оплата производится путём перевода денежных средств на расчётный счёт Исполнителя, указанный в разделе {req}. "
+                     "Обязанность Заказчика по оплате считается исполненной с момента зачисления денежных средств на расчётный "
+                     "счёт Исполнителя.")
+    extra = ("Если в ходе Работ выявится необходимость работ" + (" или материалов" if M else "") +
+             ", не учтённых Сметой, Исполнитель сообщает об этом Заказчику с указанием их стоимости. Без согласия "
+             "Заказчика такие работы не выполняются. Если Заказчик не ответит в течение 3 (трёх) рабочих дней, "
+             "Исполнитель вправе приостановить Работы, зависящие от такого решения.")
+    if o["limit"]:      # тарифы КП: бесплатные изменения
+        extra += (f" При этом до {mwords(o['limit'])} переносов или добавлений электроточек, заявленных Заказчиком до закрытия штроб "
+                  "и монтажа потолков, Исполнитель выполняет без изменения Цены Договора и без оформления дополнительного "
+                  "соглашения; переносы и добавления сверх этого количества оплачиваются по расценкам Сметы.")
+    price.append(("extra", extra))
+    S.append(("ЦЕНА ДОГОВОРА И ПОРЯДОК РАСЧЁТОВ", price))
+
+    grounds = []
+    if M:
+        grounds.append("просрочка Платежа № 1 — на количество дней просрочки (в этот период Исполнитель вправе не приступать к Работам или приостановить их);")
+    if CM:
+        grounds.append("непредоставление Заказчиком материалов по п. {custmat} либо их непригодность или недоброкачественность, выявленная Исполнителем;")
+    if not M:
+        grounds.append("непредоставление Заказчиком материалов по п. {mat} либо их непригодность или недоброкачественность, выявленная Исполнителем;")
+    grounds += [
+        "необеспечение доступа на Объект, электроснабжения на Объекте или иных условий, предусмотренных п. {cust_duties};",
+        "неготовность Объекта к Работам: незавершённые общестроительные работы (стены, перегородки, стяжка, штукатурка), работы других подрядчиков Заказчика, препятствующие электромонтажу;",
+        "изменение Заказчиком проекта, расположения электроточек или объёма Работ, выполнение дополнительных работ — на срок, указанный в дополнительном соглашении, а при его отсутствии — соразмерно увеличению объёма;",
+        "ожидание решения Заказчика по вопросам, указанным в пп. {design}, {extra}, — на время такого ожидания;",
+        "приостановка Работ по требованию Заказчика, кроме приостановки из-за недостатков Работ Исполнителя;",
+        "выявление скрытых дефектов строительных конструкций или существующих инженерных сетей, препятствующих Работам;",
+        "действия или бездействие третьих лиц, не зависящие от Исполнителя: застройщика, управляющей компании, сетевой организации (отключение электроэнергии, запрет шумных работ, ограничение доступа в здание);",
+        "обстоятельства непреодолимой силы (раздел {fm}).",
+    ]
+    terms = [
+        f"Исполнитель приступает к Работам с даты подписания Договора. Срок окончания Работ — не позднее {date_text(o['end_d'])}"
+        + (" (кроме Работ второго этапа по п. {stage2})." if st2 else ""),
+        ("ext", "Срок окончания Работ переносится соразмерно времени действия следующих обстоятельств:"),
+        ("list", grounds),
+        "О наступлении указанных обстоятельств Исполнитель сообщает Заказчику в порядке п. {notice}. Новый срок окончания "
+        "Работ определяется прибавлением к сроку по п. 3.1 количества дней действия таких обстоятельств, а при изменении "
+        "объёма Работ — сроком, указанным в дополнительном соглашении.",
+        "Исполнитель вправе выполнить Работы досрочно.",
+    ]
+    if st2:             # тарифы КП: «Под ключ» — чистовая установка после отделки
+        terms.append(("stage2",
+                      f"Второй этап Работ — установка и подключение электроустановочных изделий Заказчика (розетки, в том числе "
+                      f"интернет-розетки, выключатели, терморегуляторы) в количестве до {o['mech']} шт. по позициям Сметы «Установка …» — "
+                      "выполняется после завершения отделочных работ. Заказчик уведомляет Исполнителя о готовности Объекта ко второму "
+                      "этапу в порядке п. {notice}; Исполнитель приступает к нему в течение 10 (десяти) рабочих дней после уведомления "
+                      "и сдаёт его отдельным Актом в порядке раздела 6. Электроустановочные изделия, светильники и иное оборудование "
+                      "приобретает Заказчик; установка светильников, подсветки и подключение бытовой техники во второй этап не входят. "
+                      "Если уведомление не поступило в течение 12 (двенадцати) месяцев с даты приёмки Работ первого этапа, обязательство "
+                      "по второму этапу прекращается, а его стоимость с Заказчика не взимается."))
+    S.append(("СРОКИ ВЫПОЛНЕНИЯ РАБОТ", terms))
+
+    cd = ["оплачивать Работы в порядке и в сроки, предусмотренные разделом 2 Договора;",
+          "обеспечить Исполнителю доступ на Объект на весь срок выполнения Работ (передать ключи, оформить пропуска на территорию и в здание) с соблюдением правил, установленных управляющей компанией;",
+          "обеспечить на Объекте электроснабжение, необходимое для работы электроинструмента и освещения;",
+          "получить разрешения и согласования управляющей компании или застройщика, если они требуются для проведения Работ;"]
+    if CM:
+        cd.append("обеспечить наличие материалов в соответствии с п. {custmat};")
+    if not M:
+        cd.append("обеспечить наличие материалов в соответствии с п. {mat} и по запросу Исполнителя предоставить документы об их качестве;")
+    cd += ["отвечать на вопросы Исполнителя, требующие решения Заказчика, в течение 1 (одного) рабочего дня;",
+           "принять Работы в порядке раздела 6 Договора."]
+    S.append(("ПРАВА И ОБЯЗАННОСТИ ЗАКАЗЧИКА", [
+        ("cust_duties", "Заказчик обязан:"), ("list", cd),
+        "Заказчик вправе:",
+        ("list", ["в любое время проверять ход и качество Работ, не вмешиваясь в деятельность Исполнителя (ст. 715 ГК РФ);",
+                  "получать от Исполнителя информацию о ходе Работ;",
+                  "потребовать приостановки Работ. Приостановка, вызванная недостатками Работ Исполнителя, не продлевает срок окончания Работ; в остальных случаях срок переносится в соответствии с п. {ext};",
+                  "отказаться от исполнения Договора в порядке п. {refuse}."]),
+    ]))
+
+    ed = ["выполнить Работы в объёме, в сроки и с качеством, предусмотренными Договором;",
+          "согласовывать с Заказчиком любые отступления от проекта и Сметы, кроме случаев, предусмотренных п. {norms_dev};",
+          "соблюдать на Объекте правила техники безопасности и пожарной безопасности, поддерживать порядок и по окончании Работ убрать строительный мусор, образовавшийся в результате Работ;",
+          "до закрытия штроб и каналов (до начала чистовой отделки) передать Заказчику фото- или видеоотчёт фактического расположения кабельных трасс и скрытых элементов электросети;",
+          "перед сдачей Работ проверить смонтированные линии, автоматику и электрощит; передать Заказчику электрощит с маркировкой групп;"]
+    if not M:
+        ed.append("немедленно предупредить Заказчика о непригодности или недоброкачественности предоставленных им материалов (ст. 713, 716 ГК РФ);")
+    ed += ["сообщать Заказчику об обстоятельствах, влияющих на сроки и качество Работ;",
+           "давать Заказчику разъяснения по выполненным Работам."]
+    S.append(("ПРАВА И ОБЯЗАННОСТИ ИСПОЛНИТЕЛЯ", [
+        "Исполнитель обязан:", ("list", ed),
+        "Исполнитель вправе:",
+        ("list", ["получить оплату Работ в порядке раздела 2 Договора;",
+                  "приостановить Работы при просрочке оплаты, необеспечении доступа на Объект или иных условий, предусмотренных п. {cust_duties}"
+                  + ("" if M else ", а также при непредоставлении или непригодности материалов Заказчика") + ", — до их устранения (ст. 328, 719 ГК РФ);",
+                  "привлекать к выполнению Работ третьих лиц в соответствии с п. {subs} Договора."]),
+    ]))
+
+    S.append(("ПОРЯДОК ПРИЁМКИ РАБОТ", [
+        "По завершении Работ Исполнитель уведомляет Заказчика о готовности Работ к сдаче в порядке п. {notice} и передаёт "
+        "(направляет) Заказчику Акт выполненных работ (далее — «Акт»).",
+        ("acc_term", "В течение 3 (трёх) календарных дней с даты уведомления Заказчик обязан осмотреть и принять Работы: подписать Акт "
+         "либо передать Исполнителю мотивированный письменный отказ от приёмки с перечнем недостатков."),
+        ("fix", "Обоснованные недостатки Исполнитель устраняет за свой счёт в согласованный Сторонами срок, а при отсутствии "
+         "согласования — в течение 10 (десяти) календарных дней, после чего Работы в части устранённых недостатков сдаются "
+         "повторно в порядке пп. 6.1–6.2."),
+        f"Недостатки, не препятствующие использованию результата Работ, не являются основанием для отказа от подписания Акта: "
+        f"они перечисляются в Акте и устраняются в срок по п. {{fix}}. До их устранения Заказчик вправе удержать из {pay2_name} "
+        f"сумму, соразмерную стоимости устранения таких недостатков по Смете; остальная сумма оплачивается в срок по п. {{pay}}.",
+        ("onesided", "Если Заказчик в срок по п. {acc_term} не подписал Акт и не передал мотивированный отказ от приёмки либо уклонился "
+         "от приёмки, Исполнитель вправе составить Акт в одностороннем порядке с отметкой об этом. В этом случае Работы считаются "
+         "принятыми с даты составления одностороннего Акта, копия которого направляется Заказчику в порядке п. {notice} "
+         "(ст. 720, 753 ГК РФ)."),
+        "Заказчик, принявший Работы без проверки или без оговорок, лишается права ссылаться на явные недостатки, которые могли "
+        "быть установлены при обычном способе приёмки (п. 3 ст. 720 ГК РФ).",
+    ]))
+
+    wl = ["Исполнитель гарантирует соответствие выполненных Работ требованиям ПУЭ, СП 256.1325800.2016 и условиям Договора.",
+          f"Гарантийный срок на Работы составляет {mwords(o['warranty'])} {plural(o['warranty'], ('месяц', 'месяца', 'месяцев'))} "
+          f"с даты приёмки Работ (пп. {{acc_term}}, {{onesided}})."]
+    if M:
+        wl.append(f"На материалы, изделия и оборудование по Приложению № {AM} (кабельную продукцию, автоматику, электрощит и другие) "
+                  "действует гарантия производителя в пределах установленного производителем гарантийного срока. Недостатки таких "
+                  "материалов, выявленные в этот срок, Исполнитель устраняет за свой счёт, включая демонтаж неисправного изделия, "
+                  "монтаж исправного и, при необходимости, обращение к производителю или поставщику.")
+    else:
+        wl.append("Исполнитель не отвечает за недостатки материалов, предоставленных Заказчиком, за исключением случаев, когда их "
+                  "непригодность была очевидна при обычной приёмке и Исполнитель не предупредил об этом Заказчика (ст. 713 ГК РФ). "
+                  "Гарантийные обязательства в отношении таких материалов несут их продавец и производитель.")
+    if M and CM:
+        wl.append("Исполнитель не отвечает за недостатки материалов, предоставленных Заказчиком по п. {custmat}, за исключением "
+                  "случаев, когда их непригодность была очевидна при обычной приёмке и Исполнитель не предупредил об этом Заказчика "
+                  "(ст. 713 ГК РФ). Гарантийные обязательства в отношении таких материалов несут их продавец и производитель.")
+    wl += ["В течение гарантийного срока Исполнитель за свой счёт устраняет недостатки Работ, возникшие вследствие нарушения "
+           "технологии монтажа или по иным причинам, за которые отвечает Исполнитель.",
+           "О выявленном недостатке Заказчик сообщает Исполнителю в порядке п. {notice} с описанием и, по возможности, фотографиями, "
+           "не позднее 10 (десяти) календарных дней с момента его обнаружения, чтобы не допустить увеличения ущерба.",
+           "Исполнитель в течение 3 (трёх) рабочих дней с даты получения сообщения согласовывает с Заказчиком дату осмотра Объекта. "
+           "Подтверждённые гарантийные недостатки устраняются в согласованный Сторонами срок, но не позднее 20 (двадцати) "
+           "календарных дней с даты осмотра; если для устранения требуется поставка изделия, срок продлевается на время поставки, "
+           "о чём Исполнитель уведомляет Заказчика.",
+           "Гарантия не распространяется на недостатки, возникшие вследствие:",
+           ("list", ["механического повреждения электропроводки, оборудования, кабельных линий и других элементов электросети после приёмки Работ;",
+                     "строительных, отделочных, монтажных, демонтажных, сверлильных, штробильных и иных работ, выполненных Заказчиком или третьими лицами после приёмки Работ, в том числе повреждения скрытой электропроводки, кабельных трасс и соединений;",
+                     "нарушения правил эксплуатации электроустановок Заказчиком или третьими лицами;",
+                     "самостоятельного ремонта, переделки, демонтажа или иного вмешательства в выполненные Работы без письменного согласования с Исполнителем;",
+                     "скачков напряжения и коротких замыканий во внешних сетях электроснабжения, воздействия воды, пожара, стихийных бедствий и иных обстоятельств непреодолимой силы;",
+                     "подключения электрической нагрузки, превышающей расчётные значения;",
+                     "скрытых дефектов существующей электросети, строительных конструкций и инженерных систем, которые не могли быть выявлены при осмотре до начала Работ."]),
+           "Если при осмотре установлено, что недостаток не является гарантийным случаем, выезд, диагностика и устранение "
+           "неисправности оплачиваются Заказчиком по расценкам Исполнителя, согласованным с Заказчиком до начала таких работ."]
+    S.append(("ГАРАНТИЙНЫЕ ОБЯЗАТЕЛЬСТВА", wl))
+
+    rl = ["За неисполнение или ненадлежащее исполнение обязательств по Договору Стороны несут ответственность в соответствии "
+          "с законодательством Российской Федерации.",
+          "Ущерб, причинённый имуществу Заказчика или третьих лиц по вине Исполнителя или привлечённых им лиц, возмещается "
+          "Исполнителем; ущерб, причинённый по вине Заказчика, — Заказчиком. Факт повреждения фиксируется актом "
+          "с фотографиями, составленным Сторонами."]
+    if not FL:
+        rl.append("Ответственность Исполнителя по Договору ограничивается реальным ущербом и не может превышать Цену Договора; "
+                  "упущенная выгода не возмещается. Ограничение не применяется в случае умышленного нарушения обязательств.")
+    rl.append("Требования об уплате неустойки и возмещении убытков предъявляются письменной претензией.")
+    S.append(("ОТВЕТСТВЕННОСТЬ СТОРОН", rl))
+
+    refuse_law = "ст. 717 ГК РФ, ст. 32 Закона РФ «О защите прав потребителей»" if FL else "ст. 717 ГК РФ"
+    term = ["Договор вступает в силу с даты его подписания Сторонами и действует до полного исполнения Сторонами обязательств.",
+            "Договор может быть расторгнут по соглашению Сторон, а также в случаях, предусмотренных законодательством и Договором.",
+            ("refuse", f"Заказчик вправе в любое время до приёмки Работ отказаться от исполнения Договора, письменно уведомив "
+             f"Исполнителя и оплатив ему выполненную часть Работ и фактически понесённые расходы ({refuse_law})."),
+            "Исполнитель вправе отказаться от исполнения Договора (ст. 719 ГК РФ), письменно уведомив Заказчика, если:",
+            ("list", (["Платёж № 1 просрочен более чем на 10 (десять) календарных дней;"] if M else
+                      ["материалы Заказчика не предоставлены более 10 (десяти) календарных дней после запроса Исполнителя;"]) +
+             ["доступ на Объект не обеспечен более 10 (десяти) календарных дней;",
+              "Работы приостановлены по требованию Заказчика или по не зависящим от Исполнителя причинам более 2 (двух) месяцев."])]
+    if M:
+        term.append("При досрочном прекращении Договора Стороны составляют акт о фактически выполненных Работах. Заказчик оплачивает "
+                    "фактически выполненные Работы по расценкам Сметы и стоимость материалов по Приложению № 2, использованных "
+                    "при выполнении Работ или подготовленных для Объекта; неиспользованные материалы передаются Заказчику по акту. "
+                    "Платёж № 1 засчитывается в счёт этих сумм. Расчёт производится в течение 5 (пяти) календарных дней с даты "
+                    "прекращения Договора: излишне уплаченная сумма возвращается Заказчику, недостающая — доплачивается Заказчиком.")
+    else:
+        term.append("При досрочном прекращении Договора Стороны составляют акт о фактически выполненных Работах. Заказчик оплачивает "
+                    "фактически выполненные Работы по расценкам Сметы в течение 5 (пяти) календарных дней с даты прекращения "
+                    "Договора; Исполнитель передаёт Заказчику остаток его материалов.")
+    term.append("Прекращение Договора не освобождает Стороны от ответственности за нарушения, допущенные до его прекращения.")
+    S.append(("СРОК ДЕЙСТВИЯ, ИЗМЕНЕНИЕ И РАСТОРЖЕНИЕ ДОГОВОРА", term))
+
+    S.append(("fm", "ОБСТОЯТЕЛЬСТВА НЕПРЕОДОЛИМОЙ СИЛЫ", [
+        "Стороны освобождаются от ответственности за неисполнение обязательств, вызванное обстоятельствами непреодолимой силы "
+        "(п. 3 ст. 401 ГК РФ), на время действия этих обстоятельств. Сторона, для которой они наступили, сообщает об этом "
+        "другой Стороне в течение 3 (трёх) рабочих дней.",
+        "Если такие обстоятельства действуют более 2 (двух) месяцев, каждая Сторона вправе отказаться от Договора с расчётами "
+        "в порядке, предусмотренном разделом 9 Договора.",
+    ]))
+
+    if FL:
+        disp = ["Стороны разрешают разногласия путём переговоров. Претензия направляется в порядке п. {notice} или почтой; срок её "
+                "рассмотрения — 10 (десять) календарных дней с даты получения.",
+                "Споры, не урегулированные путём переговоров, рассматриваются судом общей юрисдикции в соответствии "
+                "с законодательством Российской Федерации о подсудности."]
+    else:
+        disp = ["Претензионный порядок урегулирования споров обязателен. Претензия направляется в порядке п. {notice} или почтой; "
+                "срок её рассмотрения — 10 (десять) рабочих дней с даты получения.",
+                "Споры, не урегулированные в претензионном порядке, передаются на рассмотрение Арбитражного суда города Москвы."]
+    S.append(("РАЗРЕШЕНИЕ СПОРОВ", disp))
+
+    contacts = "по номерам телефонов Сторон" + (" либо по адресам электронной почты Сторон" if has_email else "")
+    S.append(("УВЕДОМЛЕНИЯ И ПЕРЕПИСКА", [
+        ("notice", f"Уведомления, согласования, акты, претензии и иные сообщения по Договору Стороны направляют друг другу "
+         f"в мессенджерах (WhatsApp, Telegram, MAX и другие) {contacts}, указанным в разделе {{req}}. Такие сообщения, "
+         f"включая фотографии и сканы документов, имеют силу письменных и считаются полученными в день отправки, если "
+         f"отправлены до 20:00 по московскому времени, а при более поздней отправке — на следующий день."),
+        "Об изменении номера телефона" + (" или адреса электронной почты" if has_email else "") + " Сторона сообщает другой "
+        "Стороне в течение 1 (одного) рабочего дня; до получения такого сообщения отправка по прежним контактам считается надлежащей.",
+    ]))
+
+    other = ["Стороны не раскрывают третьим лицам информацию, полученную при исполнении Договора, в том числе проектную "
+             "документацию Объекта, без письменного согласия другой Стороны, кроме случаев, предусмотренных законодательством. "
+             "Обязательство действует в течение срока действия Договора и 5 (пяти) лет после его прекращения.",
+             "Исполнитель вправе использовать фотографии выполненных Работ (без адреса Объекта и персональных данных Заказчика) "
+             "в своих рекламных материалах только с согласия Заказчика, которое может быть дано в порядке п. {notice}."]
+    if FL:
+        other.append("Персональные данные Заказчика, указанные в Договоре, обрабатываются Исполнителем исключительно в целях "
+                     "заключения и исполнения Договора (п. 5 ч. 1 ст. 6 Федерального закона от 27.07.2006 № 152-ФЗ "
+                     "«О персональных данных»).")
+    other.append("Заказчик подтверждает, что является собственником Объекта либо действует с согласия его собственника "
+                 "и вправе заказывать выполнение Работ на Объекте.")
+    other += ["С подписанием Договора все предшествующие переговоры и переписка Сторон по его предмету теряют силу в части, "
+              "противоречащей Договору.",
+              "Изменения и дополнения к Договору действительны, если они оформлены письменно и подписаны Сторонами, кроме "
+              "согласований, которые Договор допускает в порядке п. {notice}.",
+              "Во всём, что не предусмотрено Договором, Стороны руководствуются законодательством Российской Федерации.",
+              "Договор составлен в 2 (двух) экземплярах, имеющих равную юридическую силу, по одному для каждой Стороны. "
+              "Приложения являются неотъемлемой частью Договора:"]
+    apps = ["Приложение № 1 — Смета работ;"]
+    if M:
+        apps.append(f"Приложение № {AM} — Спецификация материалов;")
+    if AD:
+        apps.append(f"Приложение № {AD} — Дизайн-проект ({o['design'].get('sheets', '')}).")
+    apps[-1] = apps[-1].rstrip(";").rstrip(".") + "."
+    other.append(("list", apps))
+    S.append(("ПРОЧИЕ УСЛОВИЯ", other))
+    S.append(("req", "РЕКВИЗИТЫ И ПОДПИСИ СТОРОН", []))
+    return S
+
+
+def number_sections(S):
+    """Номера пунктов и подстановка ссылок {key}."""
+    refs, out = {}, []
+    for si, sec in enumerate(S, 1):
+        if len(sec) == 3:
+            key, title, items = sec
+            refs[key] = str(si)
+        else:
+            title, items = sec
+        nums, k = [], 0
+        for it in items:
+            if isinstance(it, tuple) and it[0] == "list":
+                nums.append(("list", it[1]))
+                continue
+            k += 1
+            n = f"{si}.{k}"
+            if isinstance(it, tuple):
+                refs[it[0]] = n
+                txt = it[1]
+            else:
+                txt = it
+            nums.append((n, txt))
+        out.append((si, title, nums))
+
+    def res(t):
+        return re.sub(r"\{(\w+)\}", lambda m: refs.get(m.group(1), m.group(0)), t)
+    return [(si, title, [(n, [res(x) for x in t] if n == "list" else res(t)) for n, t in nums]) for si, title, nums in out], refs
+
+
+def build_contract(o) -> bytes:
+    from docx.shared import Pt
+    d = base_doc()
+    c = o["customer"]
+    e = o["EXEC"]
+    para(d, f"ДОГОВОР № {o['num']}", bold=True, align="c", size=12, after=0)
+    para(d, "на производство электромонтажных работ", bold=True, align="c", after=8)
+    tab_line(d, "г. Москва", date_long(o["date_d"]))
+    para(d, "", after=2)
+    lead = (f"**{e['full']}** (ОГРНИП {e['ogrnip']} от {e['ogrnip_date']}, ИНН {e['inn']}), именуемый в дальнейшем "
+            f"«Исполнитель», с одной стороны, и ")
+    if o["FL"]:
+        nm = "именуемый(ая)" if c.get("neutral") else ("именуемая" if c.get("female") else "именуемый")
+        ctz = "гражданин(ка)" if c.get("neutral") else ("гражданка" if c.get("female") else "гражданин")
+        pas = f"паспорт {c.get('passport', '[___]')}" + (f", выдан {c['passport_issued']}" if c.get("passport_issued") else "")
+        born = f", {c['birth']} года рождения" if c.get("birth") else ""
+        lead += (f"{ctz} РФ **{c['fio']}**{born}, {pas}, {nm} в дальнейшем «Заказчик», с другой стороны, вместе именуемые "
+                 f"«Стороны», заключили настоящий Договор (далее — «Договор») о нижеследующем.")
+        para(d, lead, indent=True)
+        para(d, "Заказчик заключает Договор для личных, семейных и домашних нужд, не связанных с осуществлением "
+                "предпринимательской деятельности.", indent=True, after=6)
+    else:
+        if c.get("is_ip"):
+            lead += (f"**{c['name']}** (ОГРНИП {c.get('ogrn', '[___]')}, ИНН {c.get('inn', '[___]')}), {c.get('named', 'именуемый')} в дальнейшем "
+                     f"«Заказчик», с другой стороны, вместе именуемые «Стороны», заключили настоящий Договор (далее — «Договор») о нижеследующем.")
+        else:
+            lead += (f"**{c.get('name', '[Наименование]')}** (ИНН {c.get('inn', '[___]')}), {c.get('named', 'именуемое')} в дальнейшем "
+                     f"«Заказчик», в лице {c.get('signer_line', '[должность, ФИО], действующего на основании [___]')}, с другой "
+                     f"стороны, вместе именуемые «Стороны», заключили настоящий Договор (далее — «Договор») о нижеследующем.")
+        para(d, lead, indent=True, after=6)
+    sections, refs = number_sections(contract_sections(o))
+    o["refs"] = refs
+    from docx.shared import Cm
+    for si, title, items in sections:
+        para(d, f"{si}. {title}", bold=True, align="c", keep=True, after=3).paragraph_format.space_before = Pt(6)
+        for n, t in items:
+            if n == "list":
+                for x in t:
+                    p = para(d, "— " + x)
+                    p.paragraph_format.left_indent = Cm(0.75)
+                    p.paragraph_format.first_line_indent = Cm(-0.4)
+            else:
+                para(d, f"{n}. {t}", indent=True)
+    sign_table(d, o)
+    return _save(d)
+
+
+def _save(d) -> bytes:
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------- акт
+def build_act(o, stage: int = 0) -> bytes:
+    """stage 0 — все работы; 1 — первый этап («Под ключ»); 2 — второй этап (чистовая установка)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm
+    d = base_doc()
+    c = o["customer"]
+    e = o["EXEC"]
+    refs = o.get("refs") or {}
+    st2_names = {w["name"] for w in o["stage2"]}
+    works = [w for w in o["works"] if (stage != 2) == (w["name"] not in st2_names)] if stage else o["works"]
+    wsum = round(sum(line_sum(w) for w in works), 2)
+    title = "АКТ ВЫПОЛНЕННЫХ РАБОТ" + (f" № {o['num']}" if not stage else f" № {o['num']}/{stage}")
+    para(d, title, bold=True, align="c", size=12, after=0)
+    para(d, f"к Договору на производство электромонтажных работ № {o['num']} от {date_text(o['date_d'])}"
+         + ({1: " — первый этап", 2: " — второй этап (п. " + refs.get("stage2", "3.6") + " Договора)"}.get(stage, "")), align="c", after=8)
+    tab_line(d, "г. Москва", "«____» ________________ 20____ г.")
+    para(d, "", after=2)
+    cust = c["fio"] if o["FL"] else (c["name"] if c.get("is_ip") else f"{c.get('name', '[___]')} в лице {c.get('signer_line', '[___]')}")
+    named = ("именуемый(ая)" if o["FL"] and c.get("neutral") else "именуемая" if o["FL"] and c.get("female")
+             else ("именуемый" if o["FL"] else c.get("named", "именуемое")))
+    para(d, f"{e['full']}, именуемый в дальнейшем «Исполнитель», с одной стороны, и {cust}, {named} в дальнейшем "
+            f"«Заказчик», с другой стороны, составили настоящий Акт о нижеследующем.", indent=True, after=4)
+    with_mat = o["M"] and stage != 2
+    para(d, f"1. Исполнитель выполнил, а Заказчик принял электромонтажные работы {obj_contract(o)}, "
+            f"в объёме и по стоимости согласно Приложению № 1 к Договору" +
+            (f", с использованием материалов Исполнителя согласно Приложению № {o['app_mat']}:" if with_mat else
+             (":" if stage == 2 else ", из материалов Заказчика:")), indent=True)
+    rows = [("№", "Наименование", "Кол-во", "Ед.", "Цена, руб.", "Сумма, руб.")]
+    for i, w in enumerate(works, 1):
+        rows.append((str(i), w["name"], qty_fmt(w["qty"]), w["unit"], num_fmt(w["price"]), num_fmt(line_sum(w))))
+    t = d.add_table(rows=len(rows), cols=6)
+    set_cell_border(t)
+    widths = [Cm(0.9), Cm(8.6), Cm(1.7), Cm(1.2), Cm(2.3), Cm(2.8)]
+    t.autofit = False
+    lay = OxmlElement("w:tblLayout")
+    lay.set(qn("w:type"), "fixed")
+    t._tbl.tblPr.append(lay)
+    for gc, w in zip(t._tbl.tblGrid.findall(qn("w:gridCol")), widths):
+        gc.set(qn("w:w"), str(int(w.twips)))
+    for col, w in zip(t.columns, widths):
+        col.width = w
+    for ri, r in enumerate(rows):
+        for ci, v in enumerate(r):
+            cell = t.rows[ri].cells[ci]
+            cell.width = widths[ci]
+            cell_text(cell, [v], bold_first=(ri == 0), size=9.5, align="l" if ci == 1 else "c")
+
+    def sumrow(label, val, bold=False):
+        row = t.add_row()
+        m = row.cells[0].merge(row.cells[4])
+        cell_text(m, [label], bold_first=bold, size=9.5, align="r")
+        cell_text(row.cells[5], [num_fmt(val)], bold_first=bold, size=9.5, align="c")
+    total = round(wsum + (o["mat_sum"] if with_mat else 0), 2)
+    sumrow("Итого работы (Приложение № 1):", wsum)
+    if with_mat:
+        sumrow(f"Материалы, использованные при выполнении работ (Приложение № {o['app_mat']}):", o["mat_sum"])
+    sumrow("ВСЕГО" + (" по Договору:" if not stage else " по настоящему Акту:"), total, bold=True)
+    para(d, "", after=2)
+    pay = refs.get("pay", "2.3")
+    para(d, f"2. Общая стоимость выполненных работ {'по Договору' if not stage else 'по настоящему Акту'} составляет "
+            f"{money(total)}, {VAT}.", indent=True)
+    if stage == 2:
+        para(d, f"3. К оплате по настоящему Акту{' (Платёж № 3)' if o['M'] else ''} — {money(wsum)} в течение 5 (пяти) календарных дней с даты подписания "
+                f"Акта (п. {pay} Договора).", indent=True)
+    elif o["M"]:
+        para(d, f"3. С учётом Платежа № 1 в размере {money(o['mat_sum'])} к оплате по настоящему Акту — "
+                f"{money(wsum)} в течение 5 (пяти) календарных дней с даты подписания Акта (п. {pay} Договора).", indent=True)
+    else:
+        para(d, f"3. Оплата в размере {money(total)} производится в течение 5 (пяти) календарных дней с даты подписания "
+                f"Акта (п. {pay} Договора).", indent=True)
+    if stage == 2:
+        para(d, "4. Электроустановочные изделия Заказчика установлены и подключены, их работа проверена.", indent=True)
+    else:
+        para(d, "4. Исполнитель передал Заказчику фото- или видеоотчёт расположения кабельных трасс и скрытых элементов электросети; "
+                "электрощит передан с маркировкой групп.", indent=True)
+    para(d, f"5. Гарантийный срок на работы — {mwords(o['warranty'])} {plural(o['warranty'], ('месяц', 'месяца', 'месяцев'))} "
+            f"с даты подписания настоящего Акта"
+            + ("; на материалы, изделия и оборудование — гарантия производителя (раздел 7 Договора)." if with_mat else " (раздел 7 Договора)."),
+         indent=True)
+    para(d, "6. Работы выполнены в полном объёме. Заказчик претензий по объёму, качеству и срокам выполнения работ не имеет, "
+            "за исключением замечаний, указанных ниже (при наличии):", indent=True)
+    for _ in range(3):
+        para(d, "_" * 86, after=0)
+    para(d, "", after=2)
+    para(d, "7. Акт составлен в 2 (двух) экземплярах, по одному для каждой Стороны.", indent=True, after=4)
+    sign_table(d, o, with_reqs=False)
+    para(d, "", after=6)
+    para(d, f"Заполняется только при одностороннем составлении Акта (п. {refs.get('onesided', '6.5')} Договора):", bold=True,
+         size=9.5, after=1, keep=True)
+    para(d, "Уведомление о готовности работ и Акт направлены Заказчику «____» ____________ 20____ г. "
+            "способом: ______________________________ (мессенджер / e-mail / почта). Подписанный Акт или мотивированный отказ "
+            "от приёмки в установленный срок не получены. Акт составлен Исполнителем в одностороннем порядке.", size=9.5)
+    para(d, f"Исполнитель ____________________ / {e['sign']} /        «____» ____________ 20____ г.", size=9.5)
+    return _save(d)
+
+
+# ---------------------------------------------------------------- xlsx
+def build_xlsx(o, kind) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, Side
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Лист1"
+    thin = Side(style="thin")
+    B = Border(left=thin, right=thin, top=thin, bottom=thin)
+    F = lambda **k: Font(name="Times New Roman", size=k.pop("size", 11), **k)  # noqa: E731
+    appn = 1 if kind == "works" else o["app_mat"]
+    title = "Смета работ" if kind == "works" else "Спецификация материалов"
+    ws.merge_cells("A1:F1")
+    ws["A1"] = f"Приложение № {appn}"
+    ws.merge_cells("A2:F2")
+    ws["A2"] = f"к Договору на производство электромонтажных работ № {o['num']} от {date_text(o['date_d'])}"
+    for a in ("A1", "A2"):
+        ws[a].alignment = Alignment(horizontal="right")
+        ws[a].font = F()
+    ws.merge_cells("A4:F4")
+    ws["A4"] = title.upper()
+    ws["A4"].font = F(bold=True, size=12)
+    ws["A4"].alignment = Alignment(horizontal="center")
+    ws.merge_cells("A5:F5")
+    ws["A5"] = "Наименование работ: электромонтажные работы"
+    ws["A5"].font = F()
+    ws.merge_cells("A6:F6")
+    ws["A6"] = obj_line(o)
+    ws["A6"].font = F()
+    hdr = ["№ п/п", "Наименование работ" if kind == "works" else "Наименование материалов, изделий и оборудования",
+           "Кол-во", "Ед. изм.", "Цена, руб.", "Стоимость, руб."]
+    r = 8
+    for ci, h in enumerate(hdr, 1):
+        c = ws.cell(r, ci, h)
+        c.font = F(bold=True)
+        c.border = B
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[r].height = 32
+    items = list(o["works"]) if kind == "works" else o["materials_list"]
+    if kind == "works" and o["stage2"]:      # второй этап — отдельным подзаголовком
+        st2 = {w["name"] for w in o["stage2"]}
+        items = [w for w in items if w["name"] not in st2] + [{"section": "Второй этап — чистовая установка после отделки"}] + o["stage2"]
+    n = 0
+    for it in items:
+        r += 1
+        if "section" in it:
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+            c = ws.cell(r, 1, it["section"])
+            c.font = F(bold=True, italic=True)
+            for ci in range(1, 7):
+                ws.cell(r, ci).border = B
+            continue
+        n += 1
+        vals = [n, it["name"], it["qty"], it["unit"], it["price"], line_sum(it)]
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(r, ci, v)
+            c.font = F()
+            c.border = B
+            c.alignment = Alignment(horizontal="left" if ci == 2 else "center", vertical="center", wrap_text=(ci == 2))
+        ws.cell(r, 3).number_format = "0.##"
+        ws.cell(r, 5).number_format = "#,##0.00"
+        ws.cell(r, 6).number_format = "#,##0.00"
+    r += 1
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+    c = ws.cell(r, 1, "Итого работы:" if kind == "works" else "Итого материалы:")
+    c.font = F(bold=True)
+    c.alignment = Alignment(horizontal="right")
+    total = o["works_sum"] if kind == "works" else o["mat_sum"]
+    c = ws.cell(r, 6, total)
+    c.font = F(bold=True)
+    c.number_format = "#,##0.00"
+    for ci in range(1, 7):
+        ws.cell(r, ci).border = B
+    r += 1
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    c = ws.cell(r, 1, f"Итого: {money(total)}, {VAT}.")
+    c.font = F(italic=True)
+    c.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[r].height = 30
+    r += 3
+    ws.cell(r, 2, "Исполнитель").font = F(bold=True)
+    ws.cell(r, 5, "Заказчик").font = F(bold=True)
+    r += 2
+    ws.cell(r, 2, f"__________________ / {o['EXEC']['sign']} /").font = F()
+    ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=6)
+    ws.cell(r, 4, f"__________________ / {cust_sign(o)} /").font = F()
+    for col, w in zip("ABCDEF", (7, 58, 10, 9, 12, 15)):
+        ws.column_dimensions[col].width = w
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_options.horizontalCentered = True
+    ws.page_margins.left = ws.page_margins.right = 0.5
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------- штамп на PDF дизайн-проекта
+def stamp_pdf(o, pdf: bytes) -> bytes:
+    from pypdf import PageObject, PdfReader, PdfWriter, Transformation
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+    if "LibSerif" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("LibSerif", FONT_TTF))
+    rd = PdfReader(io.BytesIO(pdf))
+    wr = PdfWriter()
+    lines = [f"Приложение № {o['app_design']}",
+             f"к Договору на производство электромонтажных работ № {o['num']} от {date_text(o['date_d'])}",
+             "Наименование работ: электромонтажные работы", obj_line(o)]
+    want = o["design"].get("pages")
+    pages = [rd.pages[i - 1] for i in want if 0 < i <= len(rd.pages)] if want else list(rd.pages)
+    band = 58
+    for pg in pages or list(rd.pages):
+        w = float(pg.mediabox.width)
+        h = float(pg.mediabox.height)
+        k = (h - band) / h
+        new = PageObject.create_blank_page(width=w, height=h)
+        new.merge_transformed_page(pg, Transformation().scale(k).translate((w - w * k) / 2, 4))
+        buf = io.BytesIO()
+        cv = canvas.Canvas(buf, pagesize=(w, h))
+        cv.setFont("LibSerif", 9)
+        y = h - 14
+        for ln in lines:
+            cv.drawRightString(w - 30, y - 3, ln)
+            y -= 11.5
+        cv.save()
+        buf.seek(0)
+        new.merge_page(PdfReader(buf).pages[0])
+        wr.add_page(new)
     out = io.BytesIO()
-    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
-        for it in zin.infolist():
-            data = zin.read(it.filename)
-            if it.filename == "word/document.xml":
-                xml = data.decode("utf-8")
-                for a, b in extra:
-                    xml = xml.replace(a, b)
-                i = [0]
-
-                def rep(m):
-                    k = i[0]
-                    i[0] += 1
-                    v = ph_values[k] if k < len(ph_values) else None
-                    return m.group(0) if v in (None, "") else esc(v)
-                xml = PH.sub(rep, xml)
-                j = [0]
-
-                def repd(m):
-                    k = j[0]
-                    j[0] += 1
-                    v = date_values[k] if k < len(date_values) else None
-                    return m.group(0) if v in (None, "") else esc(v)
-                xml = DATE.sub(repd, xml)
-                # «… сорок один) рублей» → «рубль», «… два) рублей» → «рубля» (в шаблоне слово «рублей» после места для суммы)
-                xml = re.sub(r"(\bодин\)\s*)рублей", r"\1рубль", xml)
-                xml = re.sub(r"(\b(?:два|три|четыре)\)\s*)рублей", r"\1рубля", xml)
-                for tok, key in CONTRACTOR_KEYS.items():
-                    xml = xml.replace("{{" + tok + "}}", esc((contractor or {}).get(key) or "[___]"))
-                data = xml.encode("utf-8")
-            elif footer_num and re.fullmatch(r"word/footer\d*\.xml", it.filename):
-                data = data.decode("utf-8").replace("№ [___]", "№ " + esc(footer_num)).encode("utf-8")
-            zout.writestr(it, data)
+    wr.write(out)
     return out.getvalue()
 
 
-# ---------- пакет ----------
-def build(res: dict, tariff: str, data: dict, contractor: dict) -> dict[str, bytes]:
-    """Возвращает {имя файла: содержимое}."""
-    g = lambda k, default="[___]": (str(data.get(k)).strip() if data.get(k) not in (None, "") else default)  # noqa: E731
-    N = numbers(res, tariff, data.get("advance"))
-    price, advance, fin, rest = N["price"], N["advance"], N["stage2"], N["rest"]
-    guar, limit, mech, brand = N["guarantee"], N["limit"], N["mech"], N["brand"]
-    person = data.get("kind", "person") == "person"
-    num = g("number", "___")
-    dt = data.get("date")
-    obj_addr = g("address", "[адрес Объекта]")
-    fio = g("fio")
-    org = g("org_name")
-    customer_name = fio if person else org
-    if person:
-        customer_short = short_fio(data.get("fio"))
+# ---------------------------------------------------------------- пакет
+def build(res: dict, tariff: str, data: dict, contractor: dict, design_pdf: bytes | None = None) -> dict[str, bytes]:
+    """{имя файла: содержимое} — как make_ip_docs.main; «Щит для монтажника» — отдельно (panel_xlsx), не в пакете клиенту."""
+    N = numbers(res, tariff, data.get("materials", "executor"))
+    N["cust_cable25"] = res["inputs"].get("cust_cable25")
+    o = object_for(N, data, contractor, bool(design_pdf))
+    num = o["num"].replace("/", "-")
+    who = ("физлицо" if o["FL"] else (o["customer"].get("signer_short") if o["customer"].get("is_ip") else o["customer"].get("name", "")))
+    who = re.sub(r"[^\wА-Яа-яЁё.\- ]", "", who or "").strip().replace(" ", "_")[:40] or "заказчик"
+    files = {}
+    files[f"01_Договор_{num}_{who}.docx"] = build_contract(o)
+    files[f"02_Приложение_1_Смета_работ_{num}.xlsx"] = build_xlsx(o, "works")
+    if o["M"]:
+        files[f"03_Приложение_2_Спецификация_{num}.xlsx"] = build_xlsx(o, "mat")
+    k = 4 if o["M"] else 3
+    if design_pdf:
+        files[f"0{k}_Приложение_{o['app_design']}_Дизайн-проект_{num}.pdf"] = stamp_pdf(o, design_pdf)
+        k += 1
+    if o["stage2"]:
+        files[f"0{k}_Акт_выполненных_работ_этап_1_{num}.docx"] = build_act(o, 1)
+        files[f"0{k + 1}_Акт_выполненных_работ_этап_2_{num}.docx"] = build_act(o, 2)
     else:
-        sn = (data.get("sign_name") or "").strip()
-        signer = (data.get("signer") or "").split()
-        customer_short = sn or (short_fio(" ".join(signer[-3:])) if signer else "[___]")
-    mon = plural(guar, ("месяц", "месяца", "месяцев"))
-    files: dict[str, bytes] = {}
-    safe_num = re.sub(r"[^\w\-]+", "-", num)
-
-    # --- договор
-    extra = []
-    if tariff == "basic":
-        extra.append(("Цена Договора является твёрдой (п. 4 ст. 709 ГК РФ) и составляет",
-                      "Цена Договора определяется по фактически выполненному объёму Работ по расценкам Сметы (Приложение № 1) и уточняется "
-                      "в Акте сдачи-приёмки (п. 3 ст. 709 ГК РФ); ориентировочная цена по Смете составляет"))
-    elif limit > 0:
-        stage2 = ""
-        if fin > 0:
-            stage2 = (f" Этап 2 (чистовая установка): после завершения отделочных работ Подрядчик устанавливает и подключает электроустановочные "
-                      f"изделия Заказчика (розетки, в том числе интернет-розетки, выключатели, терморегуляторы) в количестве до {mech} шт. по Схеме; "
-                      f"стоимость этапа 2 — {rub_words(fin)} 00 копеек — входит в Цену Договора и оплачивается в течение 3 рабочих дней после "
-                      f"подписания акта по этапу 2 (п. 2.3.2 применяется к стоимости этапа 1 в размере {rub_words(price - fin)}). "
-                      "Электроустановочные изделия, светильники и иное оборудование приобретает Заказчик; установка светильников, бра, светодиодной "
-                      "подсветки и подключение бытовой техники в этап 2 не входят и выполняются по отдельному согласованию. "
-                      "Заказчик уведомляет Подрядчика о готовности Объекта к этапу 2; Подрядчик приступает в течение 10 рабочих дней после уведомления. "
-                      "Если уведомление не поступило в течение 12 месяцев с даты акта по этапу 1, обязательство по этапу 2 прекращается, а его "
-                      "стоимость с Заказчика не взимается.")
-        extra.append(("Устные договорённости о дополнительных работах юридической силы не имеют.",
-                      "Устные договорённости о дополнительных работах юридической силы не имеют. При этом до "
-                      f"{limit} изменений расположения электроточек или добавлений электроточек, заявленных Заказчиком до закрытия штроб и "
-                      "монтажа потолков, Подрядчик выполняет без изменения Цены Договора и без оформления дополнительного соглашения; изменения "
-                      "сверх этого количества оплачиваются по расценкам Сметы." + stage2))
-    extra.append(("] месяца", "] " + mon))
-    cust25 = calc.num(res["inputs"].get("cust_cable25"))
-    if cust25:
-        extra.append(("Замена позиции Спецификации на аналог с не худшими характеристиками допускается по согласованию с Заказчиком в порядке раздела 11 Договора.",
-                      "Замена позиции Спецификации на аналог с не худшими характеристиками допускается по согласованию с Заказчиком в порядке "
-                      f"раздела 11 Договора. Кабель ВВГнг-LS 3×2,5 в количестве {int(cust25)} м предоставляет Заказчик (материал Заказчика, отмечен "
-                      "в Спецификации): его стоимость в Цену Договора не входит, Подрядчик проверяет его соответствие ГОСТ при приёмке, гарантия "
-                      "Подрядчика на этот материал не распространяется (ст. 713 ГК РФ)."))
-    common = [num, None, None, None, None, None, obj_addr, fmt_money(price), num2words(price), fmt_money(advance), num2words(advance),
-              fmt_money(rest), num2words(rest), num, fmt_date(dt), None, None, f"{guar} ({num2words(guar)})"]
-    ph = list(common)
-    if person:
-        issued = g("pass_issued")
-        ph[1:6] = [fio, g("pass_series"), g("pass_number"), issued + (", " + fmt_date(data["pass_date"]) if data.get("pass_date") else ""),
-                   g("reg_address")]
-        ph += [fio, fmt_date(data.get("birth")) or "[___]", g("pass_series"), g("pass_number"), issued,
-               fmt_date(data.get("pass_date")) or "[дата]", g("pass_code"), g("reg_address"), g("phone"), g("email"), customer_short]
-        src = "dogovor_fiz.docx"
-    else:
-        ph[1:6] = [org, g("ogrn"), g("inn"), g("signer"), g("basis", "Устава")]
-        ph += [org, g("inn"), g("kpp", "—"), g("ogrn"), g("legal_address"), g("account"), g("bank"), g("corr"), g("bik"),
-               g("org_phone"), g("org_email"), g("signer"), g("basis", "Устава"), customer_short]
-        src = "dogovor_org.docx"
-    files[f"01_Договор_{safe_num}.docx"] = fill_docx(src, ph, [date_words(dt), date_words(data.get("start")), date_words(data.get("end"))],
-                                                     extra, contractor, footer_num=num)
-    dnum = f"{num} от {fmt_date(dt)}"
-    files["02_Приложение_1_Смета.xlsx"] = smeta_xlsx(N, tariff, dnum, obj_addr, customer_name, customer_short)
-    files["03_Приложение_2_Спецификация.xlsx"] = spec_xlsx(res, N, dnum, obj_addr, customer_name, customer_short)
-    # --- акт (суммы по договору; остальное заполняется при сдаче)
-    act = [num, num, obj_addr, None, fmt_money(price - fin), num2words(price - fin), fmt_money(advance), None, fmt_money(rest),
-           None, None, None, None, None, None, str(guar), customer_short]
-    files["05_Акт_сдачи-приёмки.docx"] = fill_docx("akt.docx", act, [None, date_words(dt)], [("] месяца", "] " + mon)], footer_num=num)
-    files["06_Памятка_и_гарантийный_талон.docx"] = fill_docx("pamyatka.docx", [num, obj_addr, str(guar), customer_short],
-                                                             [date_words(dt)], [("] месяца", "] " + mon)])
-    q = [num + "/1", obj_addr, num, "1 — аванс", num, "аванс", fmt_money(advance), num2words(advance), customer_name, "Клемань К.В.",
-         customer_short, num + "/2", obj_addr, num, "2 — окончательный расчёт", num, "окончательный расчёт", fmt_money(rest),
-         num2words(rest), customer_name, "Клемань К.В.", customer_short]
-    files["07_Квитанции.docx"] = fill_docx("kvitanciya.docx", q, [None, date_words(dt), None, date_words(dt)])
-    files["08_Щит_для_монтажника.xlsx"] = panel_xlsx(res, tariff)
+        files[f"0{k}_Акт_выполненных_работ_{num}.docx"] = build_act(o)
     return files
 
 
@@ -325,248 +1137,6 @@ def zip_files(files: dict[str, bytes]) -> bytes:
     return out.getvalue()
 
 
-# ---------- Приложение 1 — смета ----------
-def unit(name: str) -> str:
-    n = name.lower()
-    if "модул" in n and "сборка" in n:
-        return "модуль"
-    if "пачек" in n:
-        return "пач."
-    if "упак" in n:
-        return "уп."
-    if any(k in n for k in ("кабел", "ввгнг", "гофра", "пугв", "витая", "штроблен", "прокладка")):
-        return "п.м"
-    if any(k in n for k in ("пакет", "тариф", "расходники", "вынос", "проход")):
-        return "объект"
-    if "оклейка" in n:
-        return "проём"
-    return "шт."
-
-
-SEC_TITLES = {"Работы": "Работы", "Материалы": "Применяемые материалы, изделия и оборудование", "Условия тарифа": "Условия тарифа"}
-SUBS = {"Работы": "Итого работы", "Материалы": "Итого материалы", "Условия тарифа": "Итого по тарифу",
-        "Чистовая установка после отделки (этап 2)": "Итого чистовая установка"}
-
-
-def smeta_xlsx(N: dict, tariff: str, dnum: str, obj_addr: str, customer_name: str, customer_short: str) -> bytes:
-    import openpyxl
-    from openpyxl.styles import Font
-    wb = openpyxl.load_workbook(os.path.join(TPL, "smeta.xlsx"))
-    ws = wb.active
-    st_sec = [copy(ws[f"{c}10"]._style) for c in "ABCDEF"]
-    st_line = [copy(ws[f"{c}11"]._style) for c in "ABCDEF"]
-    st_tot = [copy(ws[f"{c}34"]._style) for c in "ABCDEF"]
-    foot = {r: [(c, ws[f"{c}{r}"].value, copy(ws[f"{c}{r}"]._style)) for c in "ABCDEF"] for r in range(36, 48)}
-    for mr in list(ws.merged_cells.ranges):
-        if mr.min_row >= 10:
-            ws.unmerge_cells(str(mr))
-    for r in range(10, 60):
-        for c in "ABCDEF":
-            ws[f"{c}{r}"].value = None
-    ws["A2"] = f"к Договору подряда на выполнение электромонтажных работ № {dnum}"
-    ws["A5"] = "Объект: " + obj_addr
-    ws["B5"] = None
-    ws["A6"] = "Заказчик: " + customer_name
-    ws["B6"] = None
-    ws["A7"] = ("Перечень, объём и стоимость Работ и применяемых материалов (п. 1.2, 1.3, 2.1 Договора). Цена Договора едина и включает работы, "
-                "применяемые в них материалы, изделия и оборудование по Спецификации (Приложение № 2), их доставку и все издержки Подрядчика "
-                "(п. 2 ст. 709 ГК РФ, п. 2.2 Договора). Материалы применяются Подрядчиком при выполнении Работ (ст. 704 ГК РФ) и отдельно не реализуются.")
-    if tariff == "basic":
-        ws["A7"] = ws["A7"].value + " Тариф «Базовый»: окончательная стоимость определяется по фактически выполненному объёму по расценкам настоящей Сметы."
-    ws.row_dimensions[7].height = 62
-    r = 10
-    n = 0
-
-    def put(vals, styles):
-        for c, v, s in zip("ABCDEF", vals, styles):
-            cell = ws[f"{c}{r}"]
-            cell.value = v
-            cell._style = copy(s)
-
-    for s in N["smeta"]["sections"]:
-        key = s["title"].split(". ", 1)[-1]
-        lines = [ln for ln in s["lines"] if ln["qty"] > 0] + [ln for ln in s.get("panel", []) if ln["qty"] > 0]
-        if not lines:
-            continue
-        put([SEC_TITLES.get(key, key), None, None, None, None, None], st_sec)
-        ws.merge_cells(f"A{r}:F{r}")
-        r += 1
-        first = r
-        for ln in lines:
-            n += 1
-            put([n, ln["name"], unit(ln["name"]), _q(ln["qty"]), _p(ln["price"]), f"=D{r}*E{r}"], st_line)
-            r += 1
-        put([None, SUBS.get(key, "Итого"), None, None, None, f"=SUM(F{first}:F{r - 1})"], st_line)
-        for c in "BF":
-            ws[f"{c}{r}"].font = Font(name=ws[f"{c}{r}"].font.name, size=ws[f"{c}{r}"].font.size, bold=True)
-        r += 1
-    put(["ИТОГО ЦЕНА ДОГОВОРА, руб. (НДС не облагается)", None, None, None, None, N["price"]], st_tot)
-    ws.merge_cells(f"A{r}:E{r}")
-    r += 2
-    guar = N["guarantee"]
-    foot_vals = {36: N["tariff_name"], 37: f"{guar} " + plural(guar, ("месяц", "месяца", "месяцев")), 38: f"{N['brand']} — по Спецификации",
-                 39: {"basic": "уборка после работ", "std": "защита окон/дверей + уборка",
-                      "turnkey": "защита окон/дверей + уборка + вывоз мусора"}[tariff],
-                 40: fmt_money(N["advance"]), 41: fmt_money(N["rest"]), 47: f"_______________ / {customer_short} /"}
-    for src_r in range(36, 48):
-        for c, v, s in foot[src_r]:
-            cell = ws[f"{c}{r}"]
-            cell._style = copy(s)
-            cell.value = foot_vals.get(src_r) if (c == "D" and src_r in foot_vals) else v
-        if src_r in (36, 37, 38, 39, 40, 41):
-            ws.merge_cells(f"A{r}:C{r}")
-            ws.merge_cells(f"D{r}:F{r}")
-        if src_r == 43:
-            ws.merge_cells(f"A{r}:F{r}")
-            ws.row_dimensions[r].height = 42
-        r += 1
-    ws.print_area = f"A1:F{r}"
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
-
-
-# ---------- Приложение 2 — спецификация ----------
-def _maker(nm: str, brand: str) -> str:
-    n = nm.lower()
-    if n.startswith("корпус"):
-        return "ABB"
-    if "реле напряжения" in n:
-        return "[HS / DigiTOP / иное]"
-    if n.startswith("шины"):
-        return "[марка]"
-    if brand == "ABB":
-        if "контактор" in n:
-            return "ABB ESB"
-        if n.startswith("узо"):
-            return "ABB FH202"
-        if n.startswith("диф") and "3p+n" in n:
-            return "ABB DS204"
-        if n.startswith("диф"):
-            return "ABB DS201"
-        return "ABB S200"
-    if "контактор" in n:
-        return "Dekraft МК-103"
-    if n.startswith("узо"):
-        return "Dekraft УЗО-03"
-    if n.startswith("диф"):
-        return "Dekraft ДИФ-103"
-    return "Dekraft ВА-103"
-
-
-def _shift_merges(ws, idx, k):
-    ms = [mr for mr in list(ws.merged_cells.ranges) if mr.min_row >= idx]
-    for mr in ms:
-        ws.unmerge_cells(str(mr))
-    return [(mr.min_col, mr.min_row + k, mr.max_col, mr.max_row + k) for mr in ms]
-
-
-def _remerge(ws, lst):
-    for c1, r1, c2, r2 in lst:
-        ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
-
-
-def _ins(ws, idx, k, style_row):
-    if k <= 0:
-        return
-    lst = _shift_merges(ws, idx, k)
-    hs = {r: d.height for r, d in ws.row_dimensions.items() if d.height and r >= idx}
-    ws.insert_rows(idx, k)
-    for r in sorted(hs, reverse=True):
-        ws.row_dimensions[r + k].height = hs[r]
-        ws.row_dimensions[r].height = None
-    for r in range(idx, idx + k):
-        for c in "ABCDEF":
-            ws[f"{c}{r}"]._style = copy(ws[f"{c}{style_row}"]._style)
-    _remerge(ws, lst)
-
-
-def _del(ws, idx, k):
-    if k <= 0:
-        return
-    lst = _shift_merges(ws, idx + k, -k)
-    ws.delete_rows(idx, k)
-    _remerge(ws, lst)
-
-
-def spec_xlsx(res: dict, N: dict, dnum: str, obj_addr: str, customer_name: str, customer_short: str) -> bytes:
-    import openpyxl
-    wb = openpyxl.load_workbook(os.path.join(TPL, "spec.xlsx"))
-    w = wb.active
-    q = {m["key"]: float(m["qty"] or 0) for m in res["materials"]}
-    brand = N["brand"]
-    w["A2"] = f"к Договору подряда на выполнение электромонтажных работ № {dnum}"
-    w["A5"] = "Объект: " + obj_addr
-    w["B5"] = None
-    w["A6"] = "Заказчик: " + customer_name
-    w["B6"] = None
-    w["E11"] = q.get("vvg15", 0)
-    w["E12"] = q.get("vvg25", 0)
-    if q.get("vvg25_cust"):
-        w["F12"] = f"дополнительно {int(q['vvg25_cust'])} м предоставляет Заказчик (материал Заказчика, п. 1.3 Договора)"
-    w["B13"] = "Кабель ВВГнг(А)-LS 3×6 (варочная панель при однофазном вводе, однофазный проточный водонагреватель)"
-    w["F13"] = None
-    w["B14"] = "Кабель ВВГнг(А)-LS 5×4 (варочная панель при трёхфазном вводе, трёхфазный проточный водонагреватель)"
-    w["E13"] = q.get("vvg36", 0)
-    w["E14"] = q.get("vvg54", 0)
-    w["E15"] = q.get("pugv6", 0)
-    w["E16"] = q.get("pugv4", 0)
-    w["B16"] = "Провод ПУгВ 1×4 жёлто-зелёный (СУП)"
-    w["E17"] = q.get("twisted", 0)
-    w["E29"] = float(res["volumes"]["kup"])
-    w["E31"] = q.get("box", 0)
-    w["B32"] = "Клеммники Wago (упак.) и гильзы соединительные"
-    w["C32"] = "WAGO"
-    w["D32"] = "упак./шт."
-    w["E32"] = f'{int(q.get("wago", 0))} уп. + {int(q.get("sleeve", 0))} шт.'
-    w["E33"] = q.get("corr_pvc", 0)
-    if q.get("corr_pnd"):
-        w["B33"] = "Труба гофрированная ПВХ d20 (серая) / ПНД d20 (по полу)"
-        w["E33"] = f'{int(q.get("corr_pvc", 0))} ПВХ + {int(q["corr_pnd"])} ПНД'
-    w["E34"] = q.get("corr_clip", 0) + q.get("pad", 0)
-    extras = []
-    if q.get("tape"):
-        extras.append(f'нейлоновая монтажная лента {int(q["tape"])} бухт по 100 м')
-    if q.get("dowel"):
-        extras.append(f'дюбель-хомуты {int(q["dowel"])} пач.')
-    if q.get("chase_clips"):
-        extras.append(f'клипсы для кабеля в штробе {int(q["chase_clips"])} пач.')
-    if extras:
-        w["F35"] = "в т.ч. " + ", ".join(extras)
-    w["E36"] = q.get("box_cap", 0)
-    w["D42"] = f"_______________ / {customer_short} /"
-    # не учтённый материал — после строки «Заглушки»
-    unacc = [(m["name"] or "Не учтённый материал", float(m["qty"])) for m in res["materials"]
-             if m["key"].startswith("extra") and m["qty"] and m["price"]]
-    if unacc:
-        _ins(w, 37, len(unacc), 36)
-        for i, (nm, qq) in enumerate(unacc):
-            for c, v in zip("ABCDEF", [0, nm, "—", "шт.", qq, "дополнительно"]):
-                w[f"{c}{37 + i}"] = v
-    # щит — строки 19–28 шаблона
-    sec = next(s for s in N["smeta"]["sections"] if s["title"].endswith("Материалы"))
-    shield = [(ln["name"], float(ln["qty"])) for ln in sec.get("panel", []) if ln["qty"] > 0]
-    slots = 10
-    k = len(shield)
-    if k > slots:
-        _ins(w, 29, k - slots, 28)
-    elif k < slots:
-        _del(w, 19 + k, slots - k)
-    for i, (nm, qq) in enumerate(shield):
-        for c, v in zip("ABCDEF", [0, nm, _maker(nm, brand), "к-т" if nm.lower().startswith("шины") else "шт.", qq, None]):
-            w[f"{c}{19 + i}"] = v
-    n = 0
-    for r in range(10, w.max_row + 1):
-        v = w[f"A{r}"].value
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            n += 1
-            w[f"A{r}"] = n
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
-
-
-# ---------- щит для монтажника ----------
 def panel_xlsx(res: dict, tariff: str) -> bytes:
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side

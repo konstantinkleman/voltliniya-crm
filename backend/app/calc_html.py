@@ -109,8 +109,8 @@ def kp_html(res: dict, when: date | None = None, public: bool = False) -> str:
     for t in k["tariffs"]:
         rec = ' rec' if t["recommended"] else ''
         badge = '<span class="badge">рекомендуем</span>' if t["recommended"] else ''
-        tcards.append(f'<div class="t{rec}">{badge}<h3>{t["name"]}</h3><div class="price">{money(t["price"])} ₽</div>'
-                      f'<div class="sub">работы + материалы</div><div class="sub">работы {money(t["works"])} ₽<br>материалы {money(t["materials"])} ₽</div>'
+        tcards.append(f'<div class="t{rec}">{badge}<h3>{t["name"]}</h3><div class="price">{money(t["price"], True)} ₽</div>'
+                      f'<div class="sub">работы + материалы</div><div class="sub">работы {money(t["works"], True)} ₽<br>материалы {money(t["materials"], True)} ₽</div>'
                       f'<div class="m2">{money(t["per_m2"])} ₽/м²</div></div>')
     rec_i = [i for i, t in enumerate(k["tariffs"]) if t["recommended"]]
     head = "".join(f'<th class="{"rec" if i in rec_i else ""}">{escape(t["name"])}</th>' for i, t in enumerate(k["tariffs"]))
@@ -119,7 +119,7 @@ def kp_html(res: dict, when: date | None = None, public: bool = False) -> str:
     cards = ""
     for i, t in enumerate(k["tariffs"]):
         items = "".join(f"<dt>{escape(r[0])}</dt><dd>{escape(r[1 + i])}</dd>" for r in k["rows"])
-        cards += f'<div class="card{" rec" if t["recommended"] else ""}"><h3>{t["name"]} — {money(t["price"])} ₽</h3><dl>{items}</dl></div>'
+        cards += f'<div class="card{" rec" if t["recommended"] else ""}"><h3>{t["name"]} — {money(t["price"], True)} ₽</h3><dl>{items}</dl></div>'
     cond = "".join(f"<p>{escape(c)}</p>" for c in k["conditions"])
     obj = f'<p class="obj">Объект: {escape(k["object"])}</p>' if k["object"] else ""
     when = when or date.today()
@@ -148,16 +148,17 @@ def smeta_html(res: dict, tariff: str, when: date | None = None) -> str:
             rows.append(f'<tr class="note"><td colspan="4">{escape(sec["note"])}</td></tr>')
         for ln in sec["lines"]:
             rows.append(f'<tr><td>{escape(ln["name"])}</td><td class="n">{qty(ln["qty"])}</td><td class="n">{money(ln["price"], True)}</td>'
-                        f'<td class="n">{money(ln["sum"], True)}</td></tr>')
+                        f'<td class="n">{money(calc._ls(ln), True)}</td></tr>')
         if sec.get("panel"):
             rows.append(f'<tr class="pt"><td colspan="4">{escape(sec["panel_title"])}</td></tr>')
             for ln in sec["panel"]:
                 rows.append(f'<tr><td>{escape(ln["name"])}</td><td class="n">{qty(ln["qty"])}</td><td class="n">{money(ln["price"], True)}</td>'
-                            f'<td class="n">{money(ln["sum"], True)}</td></tr>')
+                            f'<td class="n">{money(calc._ls(ln), True)}</td></tr>')
         label = {"1. Работы": "Итого работы", "2. Материалы": "Итого материалы"}.get(sec["title"],
                                                                                        "Итого чистовая установка" if "Чистовая" in sec["title"] else "Итого по тарифу")
-        rows.append(f'<tr class="sub"><td colspan="3">{label}</td><td class="n">{money(sec["total"], True)}</td></tr>')
-    rows.append(f'<tr class="tot"><td colspan="3">ИТОГО К ОПЛАТЕ</td><td class="n">{money(s["total"], True)} ₽</td></tr>')
+        sec_total = round(sum(calc._ls(ln) for ln in sec["lines"] + sec.get("panel", [])), 2)     # как в договоре
+        rows.append(f'<tr class="sub"><td colspan="3">{label}</td><td class="n">{money(sec_total, True)}</td></tr>')
+    rows.append(f'<tr class="tot"><td colspan="3">ИТОГО К ОПЛАТЕ</td><td class="n">{money(calc.smeta_price(s), True)} ₽</td></tr>')
     obj = f'<p class="obj">Объект: {escape(d["object"])}</p>' if d["object"] else ""
     info = (f'{d["area"]:g} м² · {v["points"]:g} электроточек · кабель ~{calc.xround(v["cable_power"], -1):g} м · '
             f'щит {pn["assembly_qty"]:g} модулей')
