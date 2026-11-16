@@ -86,51 +86,61 @@ async function renderEditor(main, id) {
   }
   window.onbeforeunload = () => (dirty ? true : undefined);
 
-  // --- поля формы ---
-  const numField = (key, label, opts = {}) => `<label class="cf ${opts.wide ? 'wide' : ''}"><span>${esc(label)}</span>
-    <span class="stepper-in ${+inp[key] > 0 ? 'has' : ''}">${opts.noStep ? '' : `<button type="button" data-dec="${key}" aria-label="меньше">−</button>`}<input type="number" inputmode="${opts.dec ? 'decimal' : 'numeric'}" step="any" min="0" data-k="${key}" value="${inp[key] === null || inp[key] === undefined ? '' : esc(+inp[key] || (opts.blankZero ? '' : 0))}" placeholder="${esc(opts.ph ?? '0')}">${opts.noStep ? '' : `<button type="button" data-inc="${key}" aria-label="больше">+</button>`}</span>
-    ${opts.hint ? `<small ${opts.hintAttr || ''}>${esc(opts.hint)}</small>` : ''}</label>`;
+  // --- поля формы: всё строками таблицы «название — значение» ---
+  const stepper = (key, opts = {}) => `<span class="stepper-in ${opts.noStep ? 'solo' : ''} ${+inp[key] > 0 ? 'has' : ''}">${opts.noStep ? '' : `<button type="button" data-dec="${key}" aria-label="меньше">−</button>`}<input type="number" inputmode="${opts.dec ? 'decimal' : 'numeric'}" step="any" min="0" data-k="${key}" value="${inp[key] === null || inp[key] === undefined ? '' : esc(+inp[key] || (opts.blankZero ? '' : 0))}" placeholder="${esc(opts.ph ?? '0')}">${opts.noStep ? '' : `<button type="button" data-inc="${key}" aria-label="больше">+</button>`}</span>`;
+  const numRow = (key, label, opts = {}) => `<label class="trow"><span class="tl">${esc(label)}${opts.hint ? `<small ${opts.hintAttr || ''}>${esc(opts.hint)}</small>` : ''}</span>${stepper(key, opts)}</label>`;
   const seg = (key, options) => `<div class="seg2" data-seg="${key}">${options.map(([v, l]) => `<button type="button" data-v="${esc(v)}" class="${String(inp[key]) === String(v) ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
-  const chip = (key, label) => `<button type="button" class="chip ${inp[key] ? 'on' : ''}" data-chip="${key}">${esc(label)}</button>`;
+  const segRow = (key, label, options) => `<div class="trow seg-row"><span class="tl">${esc(label)}</span>${seg(key, options)}</div>`;
+  const chkRow = (key, label) => `<button type="button" class="trow chk ${inp[key] ? 'on' : ''}" data-chip="${key}" aria-pressed="${!!inp[key]}"><span class="tl">${esc(label)}</span><span class="box" aria-hidden="true"></span></button>`;
 
   function drawForm() {
     form.innerHTML = `
       <section class="cs"><h3>Объект</h3>
-        <label class="cf wide"><span>Объект (адрес / клиент) — попадает в КП</span><input type="text" data-k="object" value="${esc(inp.object)}" placeholder="ЖК, квартира, имя клиента"></label>
-        <div class="cf-row">${numField('area', 'Площадь, м²', { dec: true, noStep: true })}${numField('windows', 'Окон и дверей (оклейка)')}</div>
-        <div class="toggles">${chip('discount', 'Материал закупаем мы: −20 % на работы')}</div>
+        <div class="tbl">
+          <label class="trow col"><span class="tl">Объект (адрес / клиент) — попадает в КП</span><input type="text" class="tin" data-k="object" value="${esc(inp.object)}" placeholder="ЖК, квартира, имя клиента"></label>
+          ${numRow('area', 'Площадь, м²', { dec: true, noStep: true })}
+          ${numRow('windows', 'Окон и дверей (оклейка)')}
+          ${chkRow('discount', 'Материал закупаем мы: −20 % на работы')}
+        </div>
       </section>
       <section class="cs"><h3>Точки</h3>
-        <div class="cf-grid">${POINTS.map(([k, l]) => numField(k, l)).join('')}${numField('junctions', 'Распредкоробки', { hint: '0 — распайка в подрозетниках' })}</div>
+        <div class="tbl">${POINTS.map(([k, l]) => numRow(k, l)).join('')}${numRow('junctions', 'Распредкоробки', { hint: '0 — распайка в подрозетниках' })}</div>
       </section>
       <section class="cs"><h3>Помещения <span class="mute small" data-rooms-count></span></h3>
         <p class="small mute" style="margin:0 0 8px">По помещениям считаются линии света, розеток, тёплые полы, кондиционеры, санузлы и подписи в щите.</p>
         <div data-rooms></div>
         <div class="add-rooms"><h4>Добавить помещение</h4>
-          <div class="quick">${QUICK_ROOMS.map(([t, n], i) => `<button type="button" class="chip add" data-addroom="${i}">+ ${esc(n || t)}</button>`).join('')}</div></div>
+          <div class="quick">${QUICK_ROOMS.map(([t, n], i) => `<button type="button" class="addbtn" data-addroom="${i}">+ ${esc(n || t)}</button>`).join('')}</div></div>
       </section>
       <section class="cs"><h3>Щит</h3>
-        <div class="cf-line"><span>Ввод</span>${seg('phase', [['3', '3 фазы'], ['1', '1 фаза']])}</div>
-        <div class="cf-line"><span>Вводной, А</span>${seg('main_a', [25, 32, 40, 50, 63].map(a => [a, a]))}</div>
-        <div class="cf-line"><span>Автоматика</span>${seg('brand', [['Dekraft', 'Dekraft'], ['ABB', 'ABB']])}</div>
-        <div class="cf-line"><span>Корпус</span>${seg('case_type', [['flush', 'встраиваемый'], ['surface', 'накладной']])}</div>
-        <div class="cf-line"><span>Мастер-выключатель</span>${seg('master', [['none', 'нет'], ['light', 'свет'], ['all', 'свет + розетки']])}</div>
-        <div class="cf-row">${numField('kup', 'КУП, шт', { blankZero: true, ph: String(res.volumes.su), hint: `по умолчанию = санузлов (${res.volumes.su})`, hintAttr: 'data-kup-hint' })}</div>
-      </section>
-      <section class="cs"><h3>Техника — отдельные линии</h3>
-        <div class="toggles">${APPL.map(([k, l]) => chip(k, l)).join('')}</div>
-        <div class="cf-row" data-lens>
-          ${inp.hob ? numField('hob_len', 'Линия варочной панели, м', { noStep: true, dec: true }) : ''}
-          ${inp.flow ? numField('flow_len', 'Линия проточника, м', { noStep: true, dec: true, hint: res.volumes.flow_mode !== '—' ? 'исполнение: ' + res.volumes.flow_mode : '', hintAttr: 'data-flowmode' }) : ''}
+        <div class="tbl">
+          ${segRow('phase', 'Ввод', [['3', '3 фазы'], ['1', '1 фаза']])}
+          ${segRow('main_a', 'Вводной, А', [25, 32, 40, 50, 63].map(a => [a, a]))}
+          ${segRow('brand', 'Автоматика', [['Dekraft', 'Dekraft'], ['ABB', 'ABB']])}
+          ${segRow('case_type', 'Корпус', [['flush', 'встраиваемый'], ['surface', 'накладной']])}
+          ${segRow('master', 'Мастер-выключатель', [['none', 'нет'], ['light', 'свет'], ['all', 'свет + розетки']])}
+          ${numRow('kup', 'КУП, шт', { blankZero: true, ph: String(res.volumes.su), hint: `по умолчанию = санузлов (${res.volumes.su})`, hintAttr: 'data-kup-hint' })}
         </div>
       </section>
+      <section class="cs"><h3>Техника — отдельные линии</h3>
+        <div class="tbl two">${APPL.map(([k, l]) => chkRow(k, l)).join('')}</div>
+        ${inp.hob || inp.flow ? `<div class="tbl" data-lens style="margin-top:10px">
+          ${inp.hob ? numRow('hob_len', 'Линия варочной панели, м', { noStep: true, dec: true }) : ''}
+          ${inp.flow ? numRow('flow_len', 'Линия проточника, м', { noStep: true, dec: true, hint: res.volumes.flow_mode !== '—' ? 'исполнение: ' + res.volumes.flow_mode : '', hintAttr: 'data-flowmode' }) : ''}
+        </div>` : ''}
+      </section>
       <section class="cs"><h3>Прокладка</h3>
-        <div class="cf-line"><span>Штробление</span>${seg('chase', [[true, 'да'], [false, 'нет']])}</div>
-        <div class="cf-line"><span>Магистрали</span>${seg('route', [['ceiling', 'по потолку'], ['floor', 'по полу']])}</div>
+        <div class="tbl">
+          ${segRow('chase', 'Штробление', [[true, 'да'], [false, 'нет']])}
+          ${segRow('route', 'Магистрали', [['ceiling', 'по потолку'], ['floor', 'по полу']])}
+        </div>
       </section>
       <details class="cs" ${inp.draw15 || inp.draw25 || inp.cust_cable25 || (inp.extra || []).length ? 'open' : ''}><summary><h3>Кабель по чертежу, материал заказчика, доп. материалы</h3></summary>
-        <div class="cf-row">${numField('draw15', 'Кабель 3×1,5 по чертежу, м', { noStep: true, dec: true, hint: '0 — по норме' })}${numField('draw25', 'Кабель 3×2,5 по чертежу, м', { noStep: true, dec: true, hint: '0 — по норме' })}</div>
-        <div class="cf-row">${numField('cust_cable25', 'Кабель 3×2,5 заказчика, м', { noStep: true, dec: true, hint: 'вычитается из материалов' })}</div>
+        <div class="tbl">
+          ${numRow('draw15', 'Кабель 3×1,5 по чертежу, м', { noStep: true, dec: true, hint: '0 — по норме' })}
+          ${numRow('draw25', 'Кабель 3×2,5 по чертежу, м', { noStep: true, dec: true, hint: '0 — по норме' })}
+          ${numRow('cust_cable25', 'Кабель 3×2,5 заказчика, м', { noStep: true, dec: true, hint: 'вычитается из материалов' })}
+        </div>
         <h4 style="margin:14px 0 6px">Не учтённый материал <span class="small mute">— идёт во все тарифы и в смету</span></h4>
         <div data-extra></div>
         <button type="button" class="btn s" data-addextra>+ строка</button>
@@ -142,15 +152,16 @@ async function renderEditor(main, id) {
     const box = form.querySelector('[data-rooms]');
     const rooms = inp.rooms || [];
     form.querySelector('[data-rooms-count]').textContent = rooms.length ? '· ' + rooms.length : '';
-    box.innerHTML = rooms.map((r, i) => `<div class="room" data-room="${i}">
-      <div class="room-h"><input type="text" value="${esc(r.name)}" placeholder="${esc(r.type || 'Название')}" data-rf="name" aria-label="Название">
-        <select data-rf="type" aria-label="Тип">${['', ...defs.room_types].map(t => `<option value="${esc(t)}" ${t === r.type ? 'selected' : ''}>${esc(t || '— тип —')}</option>`).join('')}</select>
-        <button type="button" class="x" data-delroom aria-label="Удалить">×</button></div>
-      <div class="toggles sm">
-        ${OWN_LINES.includes(r.type) ? '' : `<button type="button" class="chip ${r.sockets ? 'on' : ''}" data-rt="sockets">Линия розеток</button>`}
-        <button type="button" class="chip ${r.floor ? 'on' : ''}" data-rt="floor">Тёплый пол</button>
-        <button type="button" class="chip ${r.ac ? 'on' : ''}" data-rt="ac">Кондиционер</button>
-      </div>${OWN_LINES.includes(r.type) ? `<div class="rnote">Розетки ${r.type === 'Кухня' ? 'кухни' : 'санузла'} — своими линиями, считаются автоматически</div>` : ''}</div>`).join('') || '<div class="small mute" style="padding:6px 0">Помещений пока нет — добавьте ниже.</div>';
+    const cb = (r, k) => `<button type="button" class="cb ${r[k] ? 'on' : ''}" data-rt="${k}" aria-pressed="${!!r[k]}" aria-label="${k}"></button>`;
+    box.innerHTML = rooms.length ? `<table class="rooms-t"><thead><tr><th>Помещение</th><th class="c">Розетки</th><th class="c">Тёплый пол</th><th class="c">Конди&shy;ционер</th><th class="c x-col"></th></tr></thead><tbody>
+      ${rooms.map((r, i) => `<tr data-room="${i}">
+        <td class="rn"><input type="text" value="${esc(r.name)}" placeholder="${esc(r.type || 'Название')}" data-rf="name" aria-label="Название">
+          <select data-rf="type" aria-label="Тип">${['', ...defs.room_types].map(t => `<option value="${esc(t)}" ${t === r.type ? 'selected' : ''}>${esc(t || '— тип —')}</option>`).join('')}</select></td>
+        <td class="c">${OWN_LINES.includes(r.type) ? '<span class="own" title="Розетки кухни и санузла — своими линиями, считаются автоматически">свои линии</span>' : cb(r, 'sockets')}</td>
+        <td class="c">${cb(r, 'floor')}</td>
+        <td class="c">${cb(r, 'ac')}</td>
+        <td class="c x-col"><button type="button" class="x" data-delroom aria-label="Удалить">×</button></td></tr>`).join('')}
+      </tbody></table>` : '<div class="small mute" style="padding:6px 0">Помещений пока нет — добавьте ниже.</div>';
     box.querySelectorAll('[data-room]').forEach(el => {
       const i = Number(el.dataset.room);
       el.querySelectorAll('[data-rf]').forEach(f => f.addEventListener(f.tagName === 'SELECT' ? 'change' : 'input', () => {
@@ -158,7 +169,10 @@ async function renderEditor(main, id) {
         if (f.dataset.rf === 'type') { inp.rooms[i].sockets = !OWN_LINES.includes(f.value); drawRooms(); }
         schedule();
       }));
-      el.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => { inp.rooms[i][b.dataset.rt] = !inp.rooms[i][b.dataset.rt]; b.classList.toggle('on'); schedule(); });
+      el.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => {
+        const on = !inp.rooms[i][b.dataset.rt]; inp.rooms[i][b.dataset.rt] = on;
+        b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); schedule();
+      });
       el.querySelector('[data-delroom]').onclick = () => { inp.rooms.splice(i, 1); drawRooms(); schedule(); };
     });
   }
@@ -201,7 +215,7 @@ async function renderEditor(main, id) {
       schedule(150);
     }));
     form.querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
-      const k = b.dataset.chip; inp[k] = !inp[k]; b.classList.toggle('on', inp[k]);
+      const k = b.dataset.chip; inp[k] = !inp[k]; b.classList.toggle('on', inp[k]); b.setAttribute('aria-pressed', inp[k]);
       if (k === 'hob' || k === 'flow') { const y = window.scrollY; drawForm(); window.scrollTo(0, y); }
       schedule(150);
     });
@@ -211,7 +225,7 @@ async function renderEditor(main, id) {
       const nm = same ? `${name} ${same + 1}` : name;
       inp.rooms = [...(inp.rooms || []), { name: nm, type, sockets: !OWN_LINES.includes(type), floor: false, ac: false }];
       drawRooms(); schedule();
-      form.querySelector('[data-rooms] .room:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      form.querySelector('[data-rooms] tbody tr:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
     form.querySelector('[data-addextra]').onclick = () => { inp.extra.push({ name: '', qty: 1, price: 0 }); drawExtra(); };
   }
