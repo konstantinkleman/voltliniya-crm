@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     YANDEX_DIRECT_LOGIN: str = ""     # логин клиента — только если аккаунт агентский
     AVITO_CLIENT_ID: str = ""
     AVITO_CLIENT_SECRET: str = ""
+    # распознавание паспорта и реквизитов для договора (Yandex Vision OCR, данные остаются в РФ)
+    YANDEX_VISION_API_KEY: str = ""   # API-ключ сервисного аккаунта с ролью ai.vision.user
+    YANDEX_FOLDER_ID: str = ""        # ID каталога в Яндекс Облаке
 
 
 settings = Settings()

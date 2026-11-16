@@ -77,7 +77,7 @@ def default_inputs(P: dict | None = None) -> dict:
         "sockets": 0, "lv": 0, "switches": 0, "lights": 0, "out220": 0, "junctions": 0,
         "cust_cable25": 0, "draw15": 0, "draw25": 0, "windows": 0,
         "chase": True, "route": "ceiling", "discount": False,
-        "phase": "3", "main_a": 32, "brand": p.t("general.brand", "Dekraft") or "Dekraft", "case_type": "flush",
+        "phase": "3", "main_a": 32, "brand": p.t("general.brand", "ABB") or "ABB", "case_type": "flush",
         "kup": None,
         "oven": False, "hob": False, "hob_len": None, "dishwasher": False, "washer": False, "dryer": False,
         "apron": False, "fridge": False, "flow": False, "flow_len": None, "boiler": False, "neptun": False,
@@ -533,7 +533,7 @@ def kp(res: dict) -> dict:
         "conditions": [
             f"Изменения сверх лимита: добавление точки {fmt_int(pr['add_point'])} ₽, перенос {fmt_int(pr['move_point'])} ₽.",
             f"Расчёт сделан для ввода: {'3 фазы' if d['phase'] == '3' else '1 фаза'}, вводной автомат {d['main_a']:g} А.",
-            "Стоимость предварительная, по проекту. Точная смета — после трассировки кабеля по плану.",
+            "Стоимость рассчитана по проекту и замеру. В «Стандарте» и «Под ключ» она фиксируется в договоре и не меняется; в «Базовом» уточняется по фактическому объёму после монтажа.",
             "Цены на материалы действительны 7 дней с даты предложения.",
         ],
     }

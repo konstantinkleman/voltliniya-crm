@@ -1,5 +1,6 @@
 """Калькулятор: справочник расценок, расчёты (в заявке или отдельно), КП/смета/щит, ссылка на КП для клиента."""
 import json
+import re
 import secrets
 from datetime import date
 from decimal import Decimal
@@ -32,6 +33,7 @@ class ParamPatch(BaseModel):
     product_id: int | None = None
     product2_id: int | None = None
     unlink: list[str] = []          # ["product_id"] — снять привязку
+    confirm: bool = False           # снять отметку «ПРОВЕРИТЬ» — значение верное
 
 
 @router.patch("/calc/params/{key}")
@@ -40,6 +42,20 @@ def patch_param(key: str, data: ParamPatch, _: m.User = Depends(director), db: S
     if not r:
         raise HTTPException(404, "Нет такой строки справочника")
     fields = data.model_fields_set
+    if r.section == "contractor":
+        if "vtext" not in fields:
+            raise HTTPException(400, "Реквизиты — текстом")
+        v = re.sub(r"\s+", " ", data.vtext or "").strip()
+        digits = {"contractor.account": 20, "contractor.corr": 20, "contractor.bik": 9}
+        if key in digits and v:
+            v = re.sub(r"\D", "", v)
+            if len(v) != digits[key]:
+                raise HTTPException(400, f"Нужно {digits[key]} цифр")
+        r.vtext = v[:200] or None
+        db.commit()
+        return {"ok": True}
+    if data.confirm or (fields & {"v1", "v2", "v3"}):     # подтверждение или правка значения снимает «ПРОВЕРИТЬ»
+        r.note = calc_params.confirm_note(r.note)
     for col in ("v1", "v2", "v3"):
         if col in fields:
             val = getattr(data, col)

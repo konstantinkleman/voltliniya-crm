@@ -92,6 +92,33 @@ async def main():
         await tp.goto(BASE + pg.url[pg.url.index('/#'):]); await tp.wait_for_selector(".tcards"); await tp.wait_for_timeout(500)
         await tp.screenshot(path=f"{OUT}/t01-calc.png")
         await tp.screenshot(path=f"{OUT}/t02-calc-full.png", full_page=True)
+        # договор с планшета: данные заказчика, суммы, пакет документов
+        eid = int(pg.url.split("#/calc/")[1].split("/")[0].split("?")[0])
+        await tp.click("[data-contract]"); await tp.wait_for_selector(".contract [data-f=fio]"); await tp.wait_for_timeout(400)
+        await tp.screenshot(path=f"{OUT}/t03-contract.png")
+        vals = {"number": "1611/26", "fio": "Иванов Иван Иванович", "pass_series": "4510", "pass_number": "123456",
+                "pass_issued": "ГУ МВД РОССИИ ПО Г. МОСКВЕ", "pass_code": "770-001", "reg_address": "Москва, ул. Тестовая, 1"}
+        for k, v in vals.items():
+            await tp.locator(f"[data-f={k}]").fill(v)
+        await tp.locator("[data-f=pass_date]").fill("2015-06-07")
+        await tp.wait_for_timeout(1200)
+        st = await (await tp.request.get(BASE + f"/api/estimates/{eid}/contract", headers={"Authorization": "Bearer " + tok})).json()
+        assert st["saved"] and st["data"]["fio"] == "Иванов Иван Иванович" and st["data"]["pass_date"] == "2015-06-07", st["data"]
+        await tp.screenshot(path=f"{OUT}/t04-contract-full.png", full_page=True)
+        async with tp.expect_download() as dl:
+            await tp.click("[data-zip]")
+        d = await dl.value
+        assert d.suggested_filename.endswith(".zip"), d.suggested_filename
+        await tp.click("[data-one]"); await tp.wait_for_selector(".modal.open [data-n]"); await tp.wait_for_timeout(300)
+        await tp.screenshot(path=f"{OUT}/t05-contract-files.png")
+        await tp.click(".modal.open [data-cancel]")
+        await tp.click("[data-lead]"); await tp.wait_for_timeout(800)
+        lr = await (await tp.request.get(BASE + f"/api/leads/{lead['id']}", headers={"Authorization": "Bearer " + tok})).json()
+        assert sum(1 for x in lr["documents"] if x["kind"] == "contract") == 1, lr["documents"]
+        # телефон: экран договора
+        await pg.goto(BASE + f"/#/calc/{eid}/contract"); await pg.wait_for_selector(".contract [data-f=fio]"); await pg.wait_for_timeout(400)
+        await shot("m13-contract")
+        await shot("m14-contract-full", True)
         # десктоп: справочник и список
         dctx = await b.new_context(viewport={"width": 1400, "height": 900}, locale="ru-RU")
         dp = await dctx.new_page()
@@ -101,6 +128,12 @@ async def main():
         await dp.screenshot(path=f"{OUT}/d01-list.png")
         await dp.goto(BASE + "/#/calc/params"); await dp.wait_for_selector("table.params"); await dp.wait_for_timeout(300)
         await dp.screenshot(path=f"{OUT}/d02-params.png", full_page=True)
+        await dp.click("[data-only]"); await dp.wait_for_timeout(300)
+        await dp.screenshot(path=f"{OUT}/d04-params-check.png", full_page=True)
+        n_before = await dp.locator("[data-confirm]").count()
+        await dp.locator("[data-confirm]").first.click(); await dp.wait_for_timeout(500)
+        assert await dp.locator("[data-confirm]").count() == n_before - 1
+        await dp.click("[data-only]"); await dp.wait_for_timeout(300)
         await dp.locator("input[data-key='work.chase']").fill("410"); await dp.locator("input[data-key='work.chase']").dispatch_event("change")
         await dp.wait_for_timeout(400)
         await dp.goto(BASE + pg.url[pg.url.index('/#'):]); await dp.wait_for_selector(".tcards"); await dp.wait_for_timeout(500)

@@ -16,6 +16,7 @@ SECTIONS = {
     "panel": ("Щит — прочее и правила подбора", ("Значение",)),
     "norms": ("Нормы расхода", ("Значение",)),
     "general": ("Общие настройки", ("Значение",)),
+    "contractor": ("Исполнитель — реквизиты в договоре (ИП)", ()),
 }
 
 DEFAULTS = [
@@ -118,6 +119,12 @@ DEFAULTS = [
     ('norm.clips_per_m', 'norms', 'Клипсы на метр гофры', 'шт/м', 2.5, None, None, 'Крепление каждые 40 см', None),
     ('norm.pads_per_m', 'norms', 'Площадки под стяжку на метр гофры', 'шт/м', 0.3, None, None, 'Из спецификации', None),
     ('norm.c25_corr', 'norms', 'Поправка нормы 3×2,5 (расчёт без чертежа)', '×', 1.1, None, None, '+10% к норме 3×2,5 (решение 02.11.2026)', None),
-    ('general.brand', 'general', 'Автоматика щита по умолчанию для нового расчёта', '', None, None, None, 'Dekraft или ABB — в расчёте можно переключить', 'Dekraft'),
+    ('general.brand', 'general', 'Автоматика щита по умолчанию для нового расчёта', '', None, None, None, 'Dekraft или ABB — в расчёте можно переключить', 'ABB'),
     ('general.area', 'general', 'Площадь по умолчанию для нового расчёта', 'м²', 60, None, None, None, None),
+    # реквизиты исполнителя для договора: в шаблонах вместо них метки {{C_*}} (репозиторий публичный), заполняются в CRM
+    ('contractor.address', 'contractor', 'Адрес ИП (как в ЕГРИП)', '', None, None, None, None, None),
+    ('contractor.account', 'contractor', 'Расчётный счёт', '', None, None, None, None, None),
+    ('contractor.bank', 'contractor', 'Банк', '', None, None, None, None, None),
+    ('contractor.corr', 'contractor', 'Корр. счёт', '', None, None, None, None, None),
+    ('contractor.bik', 'contractor', 'БИК', '', None, None, None, None, None),
 ]

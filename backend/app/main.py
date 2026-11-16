@@ -7,11 +7,11 @@ from . import models as m
 from .auth import hash_password
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, calc, crews, documents, expenses, intake, leads, objects, stats, stock
+from .routers import auth, calc, contracts, crews, documents, expenses, intake, leads, objects, stats, stock
 
 app = FastAPI(title="ВольтЛиния CRM", docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth.router, calc.router, intake.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router, stock.router):
+for r in (auth.router, calc.router, contracts.router, intake.router, leads.router, objects.router, crews.router, expenses.router, documents.router, stats.router, stock.router):
     app.include_router(r)
 
 # Версия сборки: deploy.sh кладёт короткий хеш коммита в APP_VERSION. Фронт сравнивает заголовок
@@ -67,6 +67,7 @@ def migrate():
         "material_lines": [("movement_id", "INTEGER")],
         "expenses": [("crew_id", "INTEGER"), ("external_ref", "VARCHAR(120) UNIQUE")],
         "leads": [("external_ref", "VARCHAR(120)"), ("utm", "VARCHAR(500)")],
+        "estimates": [("contract", "TEXT")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

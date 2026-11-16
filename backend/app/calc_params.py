@@ -1,4 +1,5 @@
 """Справочник калькулятора в БД: заполнение по умолчанию и сборка словаря P для движка с учётом привязки к складу."""
+import re
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -24,9 +25,31 @@ def links_for(key: str, section: str) -> list[tuple[str, str]]:
     return []
 
 
+NOT_IN_CALC = ("contractor", "sys")     # разделы справочника, которые не участвуют в расчёте и не входят в снимок
+CHECK_RE = re.compile(r"\s*[,;—–-]?\s*ПРОВЕРИТЬ\s*[—–;,:-]?\s*", re.I)
+
+
+def needs_check(note: str | None) -> bool:
+    return bool(note) and "ПРОВЕРИТЬ" in note.upper()
+
+
+def confirm_note(note: str | None) -> str | None:
+    """Снимает отметку «ПРОВЕРИТЬ» из примечания, пояснение оставляет."""
+    if not note:
+        return note
+    out = CHECK_RE.sub(" ", note).strip(" ;,—–-")
+    return out or None
+
+
 def seed(db: Session) -> None:
     """Добавляет недостающие строки справочника; изменённые значения не трогает."""
     have = {k for (k,) in db.execute(select(m.CalcParam.key))}
+    # разовые изменения значений по решениям владельца (метка в разделе sys — чтобы не повторять)
+    if "sys.brand_abb" not in have:     # 16.11.2026: по умолчанию ABB, а не Dekraft (один раз; дальше — как выставлено)
+        r = db.get(m.CalcParam, "general.brand")
+        if r and r.vtext == "Dekraft":
+            r.vtext = "ABB"
+        db.add(m.CalcParam(key="sys.brand_abb", section="sys", label="Автоматика по умолчанию переведена на ABB", sort=10000))
     for i, (key, section, label, unit, v1, v2, v3, note, vtext) in enumerate(DEFAULTS):
         if key in have:
             continue
@@ -54,6 +77,8 @@ def load(db: Session) -> dict:
     costs = avg_costs(db) if pids else {}
     P = {}
     for r in rows:
+        if r.section in NOT_IN_CALC:
+            continue
         item = {"v1": _f(r.v1), "v2": _f(r.v2), "v3": _f(r.v3), "vtext": r.vtext}
         for col, field in links_for(r.key, r.section):
             pid = getattr(r, field)
@@ -86,12 +111,18 @@ def describe(db: Session) -> list[dict]:
                 links.append({"col": col, "field": field, "product_id": pid, "product_name": p.name if p else None,
                               "product_price": float(p.client_price) if p and p.client_price is not None else None,
                               "product_cost": costs.get(pid) if pid else None})
-            items.append({"key": r.key, "label": r.label, "unit": r.unit, "note": r.note, "v1": _f(r.v1), "v2": _f(r.v2),
+            items.append({"key": r.key, "label": r.label, "unit": r.unit, "note": r.note, "check": needs_check(r.note),
+                          "v1": _f(r.v1), "v2": _f(r.v2),
                           "v3": _f(r.v3), "vtext": r.vtext, "links": links,
                           "updated_at": r.updated_at.isoformat() if r.updated_at else None})
         if items:
             out.append({"section": sec, "title": title, "cols": list(cols), "items": items})
     return out
+
+
+def contractor(db: Session) -> dict:
+    """Реквизиты исполнителя для договора: {ключ: текст}."""
+    return {r.key: (r.vtext or "") for r in db.scalars(select(m.CalcParam).where(m.CalcParam.section == "contractor"))}
 
 
 def _f(v):

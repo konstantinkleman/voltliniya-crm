@@ -205,7 +205,7 @@ td.num,th.num{text-align:right;white-space:nowrap}.b{font-weight:700}
 .cs h3{margin:0 0 10px;font-size:16px}
 details.cs summary{cursor:pointer;list-style:none}details.cs summary h3{display:inline;margin:0}details.cs[open] summary{margin-bottom:10px}
 .cf{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink2);font-weight:600}
-.cf input[type=text],.cf input[type=number]{font:inherit;font-size:16px;font-weight:600;color:var(--ink);padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);width:100%}
+.cf input[type=text],.cf input[type=number],.cf input[type=date],.cf input[type=email],.cf input[type=tel]{font:inherit;font-size:16px;font-weight:600;color:var(--ink);padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);width:100%}
 .cf small{font-weight:500;color:var(--mute);font-size:12px}
 .cf.wide{grid-column:1/-1;margin-bottom:10px}
 .cf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
@@ -271,3 +271,22 @@ table.params input:disabled{opacity:.5}
   .extra{grid-template-columns:1fr 60px 70px 26px}
   .docbar{gap:6px}.docbar b{display:none}.docbar .seg2{order:3;width:100%}.docbar [data-print]{margin-left:auto}
 }
+
+/* договор */
+.contract .cf-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.contract .cf.wide{margin-bottom:0}
+.contract .cf input{min-height:44px}
+.cf.ocr input{background:#FFF6D6;border-color:#E2B33C}
+@media (prefers-color-scheme:dark){.cf.ocr input{background:#3A3216;border-color:#9C7A1E}}
+.ocr-box .upl{display:inline-flex;align-items:center;cursor:pointer}
+.infobox.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.infobox.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+.dl2.sums{margin-top:14px;padding-top:12px;border-top:1px solid var(--line2);grid-template-columns:auto 1fr}
+.dl2.sums dd{text-align:left;white-space:normal}
+.dl2.sums input{font:inherit;font-weight:700;width:130px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+pre.ocr-text{white-space:pre-wrap;max-height:50vh;overflow:auto;background:var(--surface2);padding:10px;border-radius:8px;font-size:13px}
+table.params tr.chk td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+table.params .chk-tag{display:inline-block;font-size:11px;font-weight:800;color:var(--warn);background:var(--warn-soft);border-radius:6px;padding:1px 6px;margin-right:6px}
+table.params input.txt{width:100%;min-width:240px;text-align:left}
+@media (max-width:640px){.contract .cf-grid{grid-template-columns:1fr}}
+
