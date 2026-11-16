@@ -149,7 +149,7 @@ with c:
     assert "пятьдесят тысяч" in text and "60 (шестьдесят) месяцев" in text and "до 8 изменений" in text and "Этап 2" in text
     assert "«16» ноября 2026 г." in text and "«14» декабря 2026 г." in text
     left = _re.findall(r"\[[^\[\]]*\]", text)
-    assert set(left) <= {"[1/2]", "[2 (двух)]", "[___]"} and left.count("[___]") == 2, left   # банк и к/с исполнителя не заданы
+    assert set(left) <= {"[1/2]", "[2 (двух)]", "[___]"} and left.count("[___]") == 3, left   # банк и к/с исполнителя, e-mail заказчика не заданы
     one = c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "02_Приложение_1_Смета.xlsx"})
     assert one.status_code == 200 and "spreadsheetml" in one.headers["content-type"]
     assert c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "../x"}).status_code == 404

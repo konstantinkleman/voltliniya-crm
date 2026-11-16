@@ -136,7 +136,7 @@ async def main():
         await dp.click("[data-only]"); await dp.wait_for_timeout(300)
         await dp.locator("input[data-key='work.chase']").fill("410"); await dp.locator("input[data-key='work.chase']").dispatch_event("change")
         await dp.wait_for_timeout(400)
-        await dp.goto(BASE + pg.url[pg.url.index('/#'):]); await dp.wait_for_selector(".tcards"); await dp.wait_for_timeout(500)
+        await dp.goto(BASE + f"/#/calc/{eid}"); await dp.wait_for_selector(".tcards"); await dp.wait_for_timeout(500)
         await dp.screenshot(path=f"{OUT}/d03-calc-outdated.png")
         assert await dp.locator("[data-outdated]").count() == 1
         await b.close()
