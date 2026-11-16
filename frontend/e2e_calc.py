@@ -40,8 +40,8 @@ async def main():
             await pg.click("button[data-inc=sockets]")
         # помещения
         for label in ["Спальня", "Детская", "Кухня-гостиная", "Прихожая", "Санузел", "Санузел", "Балкон"]:
-            await pg.locator(".quick .chip", has_text=label).first.click(); await pg.wait_for_timeout(60)
-        rooms = pg.locator(".room")
+            await pg.locator(".quick .addbtn", has_text=label).first.click(); await pg.wait_for_timeout(60)
+        rooms = pg.locator(".rooms-t tbody tr")
         await rooms.nth(0).locator("[data-rt=ac]").click()
         await rooms.nth(1).locator("[data-rt=ac]").click()
         await rooms.nth(4).locator("[data-rt=floor]").click()
@@ -53,7 +53,7 @@ async def main():
         await pg.wait_for_function("document.querySelector('[data-status]').textContent === 'Сохранено'", timeout=8000)
         await pg.wait_for_timeout(300)
         await shot("m03-form-top")
-        await pg.locator(".room").first.scroll_into_view_if_needed(); await shot("m04-rooms")
+        await pg.locator(".rooms-t").first.scroll_into_view_if_needed(); await shot("m04-rooms")
         await pg.locator("[data-seg=master]").scroll_into_view_if_needed(); await shot("m05-panel")
         await pg.locator(".tcards").scroll_into_view_if_needed(); await pg.wait_for_timeout(200); await shot("m06-results")
         await shot("m07-full", True)

@@ -263,7 +263,7 @@ table.params input:disabled{opacity:.5}
 .lead-calc{margin-top:16px}
 .lead-calc .ec{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-top:6px;text-decoration:none;color:var(--ink)}
 .lead-calc .ec:hover{border-color:var(--act)}
-@media (max-width:1000px){.calc-grid{grid-template-columns:1fr}.calc-res{position:static}}
+@media (max-width:1000px){.calc-grid{grid-template-columns:minmax(0,1fr)}.calc-res{position:static}}
 @media (max-width:640px){
   .calc-main{padding:12px 10px 140px!important}
   .cf-grid{grid-template-columns:1fr 1fr;gap:10px}
@@ -308,4 +308,52 @@ table.params input.txt{width:100%;min-width:240px;text-align:left}
 .est-p span small{display:block;font-size:11px;color:var(--mute);font-weight:700}
 .est-p span.on{border-color:var(--act);background:var(--act-soft)}
 @media (max-width:640px){.est-list{grid-template-columns:1fr}}
+/* расчёт: поля строками таблицы */
+.tbl{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.trow{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;min-height:54px;padding:7px 10px 7px 14px;margin:0;border:0;border-bottom:1px solid var(--line2);background:none;font:inherit;color:var(--ink);text-align:left}
+.tbl>.trow:last-child{border-bottom:0}
+.trow .tl{flex:1;min-width:0;font-weight:600;font-size:14px;color:var(--ink)}
+.trow .tl small{display:block;font-weight:500;font-size:12px;color:var(--mute);margin-top:1px}
+.trow .stepper-in{flex:none;width:156px}
+.trow .stepper-in input{padding:8px 4px;font-size:16px;font-weight:700;border:1px solid var(--line);background:var(--surface);color:var(--ink);width:100%;min-height:42px}
+.trow .stepper-in button{width:44px}
+.trow .stepper-in.solo{width:156px}.trow .stepper-in.solo input{border-radius:10px!important;text-align:right;padding-right:12px}
+.trow.col{flex-direction:column;align-items:stretch;gap:6px;padding:10px 14px}
+.trow .tin{font:inherit;font-size:16px;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);width:100%;box-sizing:border-box}
+.trow.chk{cursor:pointer;touch-action:manipulation}
+.trow.chk .box{flex:none;width:30px;height:30px;box-sizing:border-box;border:2px solid var(--line);border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#fff}
+.trow.chk.on{background:var(--act-soft)}
+.trow.chk.on .tl{color:var(--act)}
+.trow.chk.on .box{background:var(--act);border-color:var(--act)}
+.trow.chk.on .box::after{content:"✓"}
+.tbl.two{display:grid;grid-template-columns:1fr 1fr}
+.tbl.two>.trow{border-bottom:1px solid var(--line2)}
+.tbl.two>.trow:nth-child(odd){border-right:1px solid var(--line2)}
+.trow.seg-row .seg2{flex:none}
+/* помещения — таблица */
+.rooms-t{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.rooms-t th{font-size:11px;font-weight:700;color:var(--mute);padding:8px 6px;border-bottom:1px solid var(--line);background:var(--surface2);text-transform:none;line-height:1.15}
+.rooms-t th:first-child{padding-left:12px}
+.rooms-t td{padding:8px 6px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.rooms-t tr:last-child td{border-bottom:0}
+.rooms-t .c{text-align:center;width:64px}
+.rooms-t .x-col{width:34px}
+.rooms-t .rn{padding-left:10px}
+.rooms-t .rn input,.rooms-t .rn select{display:block;width:100%;min-width:0;box-sizing:border-box;font:inherit;font-size:16px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.rooms-t .rn input{font-weight:700;margin-bottom:5px}
+.rooms-t .rn select{color:var(--ink2);font-size:14px}
+.cb{width:36px;height:36px;border:2px solid var(--line);border-radius:9px;background:var(--surface);display:inline-flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;cursor:pointer;touch-action:manipulation;padding:0}
+.cb.on{background:var(--act);border-color:var(--act)}
+.cb.on::after{content:"✓"}
+.rooms-t .own{font-size:11px;color:var(--mute);line-height:1.1;display:inline-block}
+.addbtn{border:1.5px dashed var(--act);background:var(--surface);color:var(--act);border-radius:10px;padding:10px 12px;font:inherit;font-weight:700;font-size:14px;text-align:left;min-height:44px;touch-action:manipulation}
+@media (max-width:640px){
+  .tbl.two{grid-template-columns:1fr}.tbl.two>.trow:nth-child(odd){border-right:0}
+  .trow.seg-row{flex-direction:column;align-items:stretch;gap:6px;padding:10px 12px}
+  .trow.seg-row .seg2{width:100%;min-width:0}.trow.seg-row .seg2 button{min-width:0;padding:8px 4px}
+  .trow .stepper-in,.trow .stepper-in.solo{width:140px}
+  .rooms-t .c{width:48px;padding:8px 2px}.rooms-t .x-col{width:30px}
+  .rooms-t th{font-size:10px;padding:8px 2px}
+  .cb{width:34px;height:34px}
+}
 
