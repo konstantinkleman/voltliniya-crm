@@ -74,10 +74,17 @@ async function openLead(id) {
       ${open ? `<button class="btn" data-lost>Проиграна</button>` : ''}
       <button class="btn" data-edit>Изменить</button>
     </div>
+    <div class="lead-calc" id="lead-calc"><div class="row sp"><h3 style="margin:0">Расчёты</h3><a class="btn s p" href="#/calc/new?lead=${l.id}">+ новый расчёт</a></div><div data-list class="small mute" style="margin-top:6px">…</div></div>
     <div id="lead-docs"></div>
     <div class="row sp" style="margin-top:20px"><h3>История</h3><button class="btn s" data-act>+ запись</button></div>
     <ul class="timeline">${l.activities.map(a => `<li>${richText(a.text)}<small>${dateTimeRu(a.created_at)}${a.user_name ? ' · ' + esc(a.user_name) : ''}</small></li>`).join('') || '<li class="mute">Пусто</li>'}</ul>
   `);
+  api.get('/api/estimates?lead_id=' + l.id).then(list => {
+    const box = d.querySelector('#lead-calc [data-list]'); if (!box) return;
+    box.className = '';
+    box.innerHTML = list.length ? list.map(e => `<a class="ec" href="#/calc/${e.id}"><span><b>${esc(e.title || 'Расчёт')}</b><br><span class="small mute">${dateRu(e.updated_at)}${e.share_token ? ' · КП отправлено' : ''}</span></span><span class="num small">Баз. ${fmt(e.summary.basic?.price)}<br>Ст. <b>${fmt(e.summary.std?.price)}</b><br>Под кл. ${fmt(e.summary.turnkey?.price)}</span></a>`).join('')
+      : '<div class="small mute">Пока нет. На замере нажмите «+ новый расчёт» — объект и площадь подставятся из заявки.</div>';
+  }).catch(() => {});
   docsBlock(d.querySelector('#lead-docs'), l.documents, { lead_id: l.id }, () => openLead(id), open ? 'Прикрепите КП на этапе «Смета отправлена», договор — при подписании.' : '');
   d.querySelector('[data-next]')?.addEventListener('click', async () => {
     if (next === 'offer_sent') {

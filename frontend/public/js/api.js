@@ -38,13 +38,15 @@ async function req(method, url, body, isForm) {
     throw new ApiError(r.status, detail);
   }
   if (r.status === 204) return null;
-  return r.json();
+  const ct = r.headers.get('Content-Type') || '';
+  return ct.includes('text/html') ? r.text() : r.json();
 }
 
 export const api = {
   get: (u) => req('GET', u),
   post: (u, b) => req('POST', u, b),
   patch: (u, b) => req('PATCH', u, b),
+  put: (u, b) => req('PUT', u, b),
   del: (u) => req('DELETE', u),
   upload: (u, form) => req('POST', u, form, true),
   async login(email, password) {

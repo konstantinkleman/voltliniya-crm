@@ -1,6 +1,7 @@
 import { api, token, getDicts, resetDicts } from './api.js';
 import { html, esc, toast } from './ui.js';
 import * as leads from './pages/leads.js';
+import * as calc from './pages/calc.js';
 import * as objects from './pages/objects.js';
 import * as crews from './pages/crews.js';
 import * as stock from './pages/stock.js';
@@ -13,10 +14,10 @@ export const state = { me: null, dicts: null };
 const app = document.getElementById('app');
 
 const NAV = [
-  ['leads', 'Заявки'], ['objects', 'Объекты'], ['stock', 'Склад'], ['crews', 'Прорабы и бригады'],
+  ['leads', 'Заявки'], ['calc', 'Расчёты'], ['objects', 'Объекты'], ['stock', 'Склад'], ['crews', 'Прорабы и бригады'],
   ['expenses', 'Расходы'], ['stats', 'Аналитика'], ['settings', 'Настройки'],
 ];
-const PAGES = { leads, objects, stock, crews, expenses, stats, settings };
+const PAGES = { leads, calc, objects, stock, crews, expenses, stats, settings };
 
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -68,6 +69,7 @@ export async function render() {
   if (!state.me.is_director || r.page === 'my') {
     return foreman.render(app, r, state);
   }
+  if (r.page !== 'calc') window.onbeforeunload = null;
   const page = PAGES[r.page] ? r.page : 'leads';
   if (!PAGES[r.page]) { location.hash = '#/leads'; return; }
   const main = shell(page, '<div class="empty">Загрузка…</div>');

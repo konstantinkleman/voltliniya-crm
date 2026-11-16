@@ -24,6 +24,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
+      - name: calc vs Excel
+        run: python tests/calc_test.py
       - name: smoke
         run: DATABASE_URL=sqlite:///./test.db python tests/smoke.py
       - name: intake
@@ -32,3 +34,37 @@ jobs:
         run: >
           DATABASE_URL=sqlite:///./test_adspend.db INTAKE_TOKEN=tok-123
           YANDEX_DIRECT_TOKEN=y-tok AVITO_CLIENT_ID=a-id AVITO_CLIENT_SECRET=a-sec python tests/adspend.py
+      - name: calc api
+        run: DATABASE_URL=sqlite:///./test_calc.db python tests/calc_api.py
+
+  e2e-calc:
+    runs-on: ubuntu-latest
+    env:
+      UPLOAD_DIR: ./uploads
+      ADMIN_EMAIL: d@test.ru
+      ADMIN_PASSWORD: secret123
+      JWT_SECRET: 0123456789abcdef0123456789abcdef
+      DATABASE_URL: sqlite:///./e2e.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: start servers
+        run: |
+          cd backend && (uvicorn app.main:app --port 8000 > ../api.log 2>&1 &) && cd ..
+          (python frontend/devserver.py frontend/public 8080 > web.log 2>&1 &)
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && break; sleep 1; done
+      - name: e2e calc
+        run: python frontend/e2e_calc.py shots
+      - if: always()
+        run: tail -50 api.log || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calc-shots
+          path: shots

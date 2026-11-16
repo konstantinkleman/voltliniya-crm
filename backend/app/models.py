@@ -385,3 +385,39 @@ class StockMovement(Base):
     product: Mapped["Product"] = relationship()
     object: Mapped["WorkObject | None"] = relationship()
     user: Mapped["User | None"] = relationship()
+
+
+# ---------- калькулятор ----------
+class CalcParam(Base):
+    """Справочник калькулятора (лист «Расценки»): цены, нормы, корпуса, автоматика.
+    v1/v2/v3 — значения по колонкам раздела (у автоматики: Dekraft, ABB, модулей; у корпусов: номинал, вмещает, цена).
+    product_id / product2_id — привязка цены к позиции склада (цена клиенту берётся оттуда, если задана)."""
+    __tablename__ = "calc_params"
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    section: Mapped[str] = mapped_column(String(30), index=True)
+    label: Mapped[str] = mapped_column(String(300))
+    unit: Mapped[str | None] = mapped_column(String(30))
+    note: Mapped[str | None] = mapped_column(Text)
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+    v1: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    v2: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    v3: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    vtext: Mapped[str | None] = mapped_column(String(200))
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
+    product2_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class Estimate(Base, TimestampMixin):
+    """Расчёт объекта: данные замера + снимок справочника на момент расчёта (старые КП не меняются при смене цен)."""
+    __tablename__ = "estimates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), index=True)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    inputs: Mapped[str] = mapped_column(Text, default="{}")          # JSON данных замера
+    params: Mapped[str] = mapped_column(Text, default="{}")          # JSON снимка справочника
+    tariff: Mapped[str] = mapped_column(String(20), default="std")   # выбранный тариф для сметы и щита
+    summary: Mapped[str] = mapped_column(Text, default="{}")         # JSON цен по тарифам для списков
+    share_token: Mapped[str | None] = mapped_column(String(40), unique=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    lead: Mapped["Lead | None"] = relationship()
