@@ -26,13 +26,12 @@ async function renderList(main) {
   const list = await api.get('/api/estimates');
   main.innerHTML = `<div class="head"><div><h1>Расчёты</h1><p>Калькулятор чернового электромонтажа: замер → три тарифа → КП клиенту</p></div>
     <div class="row"><a class="btn" href="#/calc/params">Расценки и нормы</a><a class="btn p" href="#/calc/new">Новый расчёт</a></div></div>
-    ${list.length ? `<div class="card wrap"><table><tr><th>Объект</th><th>Заявка</th><th class="num">Базовый</th><th class="num">Стандарт</th><th class="num">Под ключ</th><th>Изменён</th></tr>
-      ${list.map(e => `<tr class="click" data-id="${e.id}"><td><b>${esc(e.title || 'Расчёт')}</b><div class="small mute">${e.summary.area ? num(e.summary.area, 1) + ' м² · ' : ''}${e.summary.points ? num(e.summary.points) + ' точек' : ''}${e.share_token ? ' · <span class="tag act">КП отправлено</span>' : ''}</div></td>
-        <td>${e.lead_name ? esc(e.lead_name) : '<span class="mute">—</span>'}</td>
-        ${TARIFFS.map(t => `<td class="num ${e.tariff === t ? 'b' : ''}">${e.summary[t] ? fmt(e.summary[t].price) : '—'}</td>`).join('')}
-        <td class="small mute">${dateRu(e.updated_at)}</td></tr>`).join('')}</table></div>`
+    ${list.length ? `<div class="est-list">${list.map(e => `<a class="est" href="#/calc/${e.id}">
+        <div class="est-h"><b>${esc(e.title || 'Расчёт')}</b><span class="small mute">${dateRu(e.updated_at)}</span></div>
+        <div class="small mute">${e.lead_name ? esc(e.lead_name) + ' · ' : ''}${e.summary.area ? num(e.summary.area, 1) + ' м² · ' : ''}${e.summary.points ? num(e.summary.points) + ' точек' : ''}${e.share_token ? ' · <span class="tag act">КП отправлено</span>' : ''}</div>
+        <div class="est-p">${TARIFFS.map(t => `<span class="${e.tariff === t ? 'on' : ''}"><small>${TN[t]}</small>${e.summary[t] ? fmtk(e.summary[t].price) : '—'}</span>`).join('')}</div>
+      </a>`).join('')}</div>`
       : emptyState('Расчётов пока нет', 'Нажмите «Новый расчёт» или откройте заявку и начните расчёт из неё — тогда объект и площадь подставятся сами.')}`;
-  main.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => location.hash = '#/calc/' + tr.dataset.id);
 }
 
 // ---------- редактор ----------
