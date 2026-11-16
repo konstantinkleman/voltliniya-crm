@@ -37,7 +37,7 @@ with c:
     e = ok(c.put(f"/api/estimates/{e['id']}", json={"inputs": ex["inputs"], "tariff": "turnkey"}))
     for tn in calc.TARIFFS:
         assert abs(e["result"]["tariffs"][tn]["price"] - ex["expected"]["tariffs"][tn]["price"]) < 0.02, (tn, e["result"]["tariffs"][tn]["price"])
-    assert e["tariff"] == "turnkey" and e["summary"]["std"]["price"] == ex["expected"]["kp"]["std"]
+    assert e["tariff"] == "turnkey" and abs(e["summary"]["std"]["price"] - ex["expected"]["kp"]["std"]) <= 505
 
     # документы
     kp = ok(c.get(f"/api/estimates/{e['id']}/doc/kp"))
@@ -114,6 +114,7 @@ with c:
 
     # реквизиты исполнителя: текст, проверка цифр; в расчёт и снимок не попадают
     assert "contractor.account" in items and items["contractor.account"]["vtext"] is None
+    assert items["contractor.bik"]["vtext"] == "044525411" and "ВТБ" in items["contractor.bank"]["vtext"]
     assert c.patch("/api/calc/params/contractor.account", json={"vtext": "123"}).status_code == 400
     ok(c.patch("/api/calc/params/contractor.account", json={"vtext": "4080 2810 0000 0000 0001"}))
     ok(c.patch("/api/calc/params/contractor.bik", json={"vtext": "044500001"}))
@@ -126,7 +127,7 @@ with c:
     assert st["data"]["kind"] == "person" and st["data"]["address"] == "ЖК Шагал" and not st["saved"] and not st["ocr_ready"]
     n = st["numbers"]
     assert n["price"] + 0 == round(n["price"]) and n["rest"] == n["price"] - n["advance"] - n["stage2"] and n["advance"] % 1000 == 0
-    assert "Фамилия Имя Отчество" in st["missing"] and "Реквизиты исполнителя: банк" in st["missing"]
+    assert "Фамилия Имя Отчество" in st["missing"] and not any(x.startswith("Реквизиты исполнителя") for x in st["missing"])
     person = {"kind": "person", "number": "1611/26", "date": "2026-11-16", "start": "2026-11-23", "end": "2026-12-14",
               "address": "Москва, ул. Тестовая, 1, кв. 2", "fio": "Иванов Иван Иванович", "birth": "1985-03-04",
               "pass_series": "4510", "pass_number": "123456", "pass_issued": "ГУ МВД РОССИИ ПО Г. МОСКВЕ", "pass_date": "2015-06-07",
@@ -149,7 +150,7 @@ with c:
     assert "пятьдесят тысяч" in text and "60 (шестьдесят) месяцев" in text and "до 8 изменений" in text and "Этап 2" in text
     assert "«16» ноября 2026 г." in text and "«14» декабря 2026 г." in text
     left = _re.findall(r"\[[^\[\]]*\]", text)
-    assert set(left) <= {"[1/2]", "[2 (двух)]", "[___]"} and left.count("[___]") == 3, left   # банк и к/с исполнителя, e-mail заказчика не заданы
+    assert set(left) <= {"[1/2]", "[2 (двух)]", "[___]"} and left.count("[___]") == 1, left   # не задан только e-mail заказчика
     one = c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "02_Приложение_1_Смета.xlsx"})
     assert one.status_code == 200 and "spreadsheetml" in one.headers["content-type"]
     assert c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "../x"}).status_code == 404
@@ -159,8 +160,39 @@ with c:
     L = ok(c.get(f"/api/leads/{lead['id']}"))
     docs = [d for d in L["documents"] if d["title"].endswith(f"расчёт {e5['id']}")]
     assert len(docs) == 7 and {d["kind"] for d in docs} >= {"contract", "appendix", "act"}, docs
-    # распознавание без ключа Яндекса — понятная ошибка
+    # распознавание: без ключа — понятная ошибка; с ключом — ответ OpenAI проверяется и нормализуется
     rr = c.post("/api/contract/recognize", files=[("files", ("p.jpg", b"\xff\xd8\xff", "image/jpeg"))])
-    assert rr.status_code == 400 and "YANDEX_VISION_API_KEY" in rr.text, rr.text
+    assert rr.status_code == 400 and "OPENAI_API_KEY" in rr.text, rr.text
+    import io as _io2, json as _json
+    from PIL import Image
+    from app import doc_ocr
+    from app.config import settings as _st
+    buf = _io2.BytesIO(); Image.new("RGB", (40, 30), "white").save(buf, format="PNG")
+    sent = {}
+
+    class _R:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": _json.dumps({"kinds": ["passport", "registration"], "fields": {
+                "fio": "Иванов Иван Иванович", "birth": "04.03.1985", "pass_series": "45 10", "pass_number": "123456",
+                "pass_issued": "ГУ МВД РОССИИ ПО Г. МОСКВЕ", "pass_date": "2015-06-07", "pass_code": "770001",
+                "reg_address": "г. Москва, ул. Тестовая, д. 1, кв. 2", "inn": "123", "org_name": None}}, ensure_ascii=False)}}]}
+
+    def _post(url, json=None, **kw):
+        sent["url"], sent["n"] = url, len(json["messages"][1]["content"])
+        return _R()
+    _old = (doc_ocr.httpx.post, _st.OPENAI_API_KEY)
+    doc_ocr.httpx.post, _st.OPENAI_API_KEY = _post, "test"
+    try:
+        rr = ok(c.post("/api/contract/recognize", files=[("files", ("a.png", buf.getvalue(), "image/png")),
+                                                         ("files", ("b.png", buf.getvalue(), "image/png"))]))
+        assert ok(c.get(f"/api/estimates/{e5['id']}/contract"))["ocr_ready"]
+    finally:
+        doc_ocr.httpx.post, _st.OPENAI_API_KEY = _old
+    f = rr["fields"]
+    assert sent["url"].endswith("/chat/completions") and sent["n"] == 3, sent
+    assert f["kind"] == "person" and f["birth"] == "1985-03-04" and f["pass_series"] == "4510" and f["pass_code"] == "770-001"
+    assert "inn" not in f and "org_name" not in f and rr["kinds"] == ["passport", "registration"], rr
 
 print("CALC API OK")

@@ -143,8 +143,7 @@ def numbers(res: dict, tariff: str, advance=None) -> dict:
     fin = by["Чистовая установка после отделки (этап 2)"]["total"] if tariff == "turnkey" else 0.0
     # цена = сумма строк Приложения № 1 в том виде, как они напечатаны (кол-во и цена до копеек), до рубля —
     # чтобы итог сметы сходился со строками; от итога «СметаДанные» в Excel отличается на 1–3 ₽
-    shown = sum(_q(ln["qty"]) * _p(ln["price"]) for s in sm["sections"] for ln in s["lines"] + s.get("panel", []) if ln["qty"] > 0)
-    price = calc.xround(shown)
+    price = calc.smeta_price(sm)     # = цена в КП
     adv_default = calc.xround(mats, -3)
     adv = adv_default if advance in (None, "") else calc.xround(calc.num(advance))
     fin = calc.xround(fin)
@@ -155,12 +154,7 @@ def numbers(res: dict, tariff: str, advance=None) -> dict:
             "smeta": sm}
 
 
-def _q(x) -> float:
-    return calc.xround(float(x or 0), 2)
-
-
-def _p(x) -> float:
-    return calc.xround(float(x or 0), 2)
+_q = _p = calc.shown
 
 
 def default_data(lead=None, inputs: dict | None = None, today: date | None = None) -> dict:

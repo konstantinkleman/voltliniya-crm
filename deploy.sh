@@ -94,7 +94,7 @@ fi
 # 2b''. Автозагрузка рекламных расходов: пустые строки, чтобы было куда вставить ключи.
 grep -q '^YANDEX_DIRECT_TOKEN=' .env || printf '\n# Автозагрузка расходов Яндекс Директа (OAuth-токен API Директа); логин — только для агентского аккаунта\nYANDEX_DIRECT_TOKEN=\nYANDEX_DIRECT_LOGIN=\n' >> .env
 grep -q '^AVITO_CLIENT_ID=' .env || printf '\n# Автозагрузка расходов Авито (ключи из avito.ru/professionals/api)\nAVITO_CLIENT_ID=\nAVITO_CLIENT_SECRET=\n' >> .env
-grep -q '^YANDEX_VISION_API_KEY=' .env || printf '\n# Распознавание паспорта и реквизитов для договора (Yandex Vision OCR): API-ключ сервисного аккаунта и ID каталога\nYANDEX_VISION_API_KEY=\nYANDEX_FOLDER_ID=\n' >> .env
+grep -q '^YANDEX_VISION_API_KEY=' .env || printf '\n# Необязательно: распознавание паспорта через Yandex Vision (данные в РФ) вместо OpenAI — DOC_OCR_PROVIDER=yandex, ключ и ID каталога\nYANDEX_VISION_API_KEY=\nYANDEX_FOLDER_ID=\n' >> .env
 
 # 2c. Версия сборки = хеш коммита: по ней открытые вкладки CRM понимают, что надо перезагрузиться.
 sed -i '/^APP_VERSION=/d' .env

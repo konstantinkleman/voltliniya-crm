@@ -30,7 +30,9 @@ for i, f in enumerate(fx):
     for t in calc.TARIFFS:
         for k in ("price", "works_total", "materials_total"):
             checks.append((f"{t}.{k}", res["tariffs"][t][k], e["tariffs"][t][k]))
-        checks.append((f"kp.{t}", res["kp"][t]["price"], e["kp"][t]))
+        checks.append((f"kp.{t}", calc.xround(res["tariffs"][t]["price"], -3), e["kp"][t]))   # Excel: КП до тысяч
+        if abs(res["kp"][t]["price"] - res["tariffs"][t]["price"]) > 5:     # КП в CRM — точная сумма по строкам сметы
+            checks.append((f"kp_exact.{t}", res["kp"][t]["price"], round(res["tariffs"][t]["price"])))
     sm = calc.smeta(res, f["inputs"]["tariff"])
     checks.append(("smeta_total", sm["total"], e["smeta_total"]))
     for name, mine, xl in checks:

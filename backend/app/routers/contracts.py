@@ -47,7 +47,7 @@ def _state(e: m.Estimate, db: Session) -> dict:
     return {"estimate_id": e.id, "lead_id": e.lead_id, "title": e.title, "tariff": e.tariff, "data": data, "numbers": n,
             "missing": contract.missing(data, con), "saved": bool(e.contract),
             "fields": {"common": contract.COMMON_FIELDS, "person": contract.PERSON_FIELDS, "org": contract.ORG_FIELDS},
-            "ocr_ready": bool(settings.YANDEX_VISION_API_KEY and settings.YANDEX_FOLDER_ID)}
+            "ocr_ready": doc_ocr.ready(), "ocr_provider": doc_ocr.provider()}
 
 
 @router.get("/estimates/{eid}/contract")

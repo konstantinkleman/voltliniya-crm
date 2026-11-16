@@ -1,19 +1,19 @@
 """Распознавание документов заказчика для договора: паспорт РФ (разворот с фото), страница с пропиской,
-карточка реквизитов ИП/ООО. Сервис — Yandex Vision OCR (Яндекс Облако, РФ): персональные данные не уходят
-за границу (в реестре РКН у ИП трансграничная передача — «нет»). Журналирование запросов у Яндекса выключено
-заголовком x-data-logging-enabled: false. Фото на сервере CRM не сохраняется — только распознанные поля.
+карточка реквизитов ИП/ООО. Фото на сервере CRM не сохраняется — только распознанные поля, их проверяет директор.
 
-Порядок: сначала модель «passport»; если полей паспорта нет — модель «page» (весь текст) и разбор
-реквизитов организации или адреса регистрации по шаблонам.
+Сервис по умолчанию — OpenAI (тот же ключ, что для накладных; решение владельца 16.11.2026). Это трансграничная
+передача персональных данных (США) — в реестре РКН у ИП сейчас указано «нет», политика тоже говорит «не осуществляется».
+Альтернатива без передачи за рубеж — Yandex Vision OCR: DOC_OCR_PROVIDER=yandex + YANDEX_VISION_API_KEY и YANDEX_FOLDER_ID.
 """
 import base64
+import json
 import re
 
 import httpx
 from fastapi import HTTPException
 
 from .config import settings
-from .invoice_ai import _to_jpeg
+from .invoice_ai import _image_parts, _to_jpeg
 
 URL = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
 
@@ -171,8 +171,117 @@ def registration_address(text: str) -> str:
     return ", ".join(picked)
 
 
+def provider() -> str:
+    return "yandex" if settings.DOC_OCR_PROVIDER == "yandex" else "openai"
+
+
+def ready() -> bool:
+    if provider() == "yandex":
+        return bool(settings.YANDEX_VISION_API_KEY and settings.YANDEX_FOLDER_ID)
+    return bool(settings.OPENAI_API_KEY)
+
+
 def recognize(images: list[tuple[bytes, str]]) -> dict:
     """images: [(данные, mime)]. Возвращает {"fields": {...}, "kinds": [...], "text": "..."} — поля для формы договора."""
+    return _recognize_yandex(images) if provider() == "yandex" else _recognize_openai(images)
+
+
+PROMPT = """Ты переносишь данные из документов заказчика в договор подряда (Россия). На фото может быть: разворот паспорта РФ
+с фотографией, страница паспорта со штампом о регистрации (прописка), карточка реквизитов ИП/ООО, выписка ЕГРИП/ЕГРЮЛ, счёт.
+Верни ТОЛЬКО JSON без пояснений:
+{"kinds": ["passport"|"registration"|"org"|"other" — по одному на каждое фото, в том же порядке],
+ "fields": {"fio": null, "birth": null, "pass_series": null, "pass_number": null, "pass_issued": null, "pass_date": null,
+            "pass_code": null, "reg_address": null, "org_name": null, "ogrn": null, "inn": null, "kpp": null,
+            "legal_address": null, "signer": null, "sign_name": null, "basis": null, "account": null, "bank": null,
+            "corr": null, "bik": null, "org_phone": null, "org_email": null}}
+Правила:
+- Переписывай только то, что видно на фото. Не угадывай: нечитаемое или отсутствующее — null.
+- fio — «Фамилия Имя Отчество» обычным регистром (Иванов Иван Иванович).
+- Даты (birth — дата рождения, pass_date — дата выдачи паспорта) — в формате YYYY-MM-DD.
+- pass_series — 4 цифры без пробелов, pass_number — 6 цифр, pass_code — код подразделения «000-000».
+- pass_issued — кем выдан, как напечатано в паспорте (заглавными, как в документе), одной строкой.
+- reg_address — адрес из действующего штампа о регистрации (если штампов несколько — последний не погашенный «снят с учёта»),
+  одной строкой: регион, город/населённый пункт, улица, дом, корпус/строение, квартира.
+- org_name — полное наименование: «Общество с ограниченной ответственностью «…»» или «Индивидуальный предприниматель Фамилия Имя Отчество».
+- ogrn — ОГРН (13 цифр) или ОГРНИП (15 цифр); inn — 10 или 12 цифр; kpp — 9 цифр (у ИП нет — null);
+  account — расчётный счёт (20 цифр), corr — корреспондентский счёт (20 цифр), bik — 9 цифр, bank — наименование банка.
+- signer — кто подписывает, в родительном падеже для фразы «в лице …»: «генерального директора Иванова Ивана Ивановича»;
+  sign_name — его фамилия и инициалы «Иванов И.И.»; basis — «Устава» для ООО, «записи в ЕГРИП» для ИП, либо как указано.
+- Все числа реквизитов — только цифры, без пробелов.
+"""
+
+FIELD_KEYS = ["fio", "birth", "pass_series", "pass_number", "pass_issued", "pass_date", "pass_code", "reg_address", "org_name",
+              "ogrn", "inn", "kpp", "legal_address", "signer", "sign_name", "basis", "account", "bank", "corr", "bik",
+              "org_phone", "org_email"]
+DIGITS = {"pass_series": (4,), "pass_number": (6,), "inn": (10, 12), "kpp": (9,), "ogrn": (13, 15), "account": (20,), "corr": (20,),
+          "bik": (9,)}
+
+
+def clean_fields(raw: dict) -> dict:
+    """Проверка и нормализация ответа модели: неверные по формату значения отбрасываются."""
+    out = {}
+    for k in FIELD_KEYS:
+        v = raw.get(k)
+        if v in (None, "", "null"):
+            continue
+        v = re.sub(r"\s+", " ", str(v)).strip()
+        if k in DIGITS:
+            d = re.sub(r"\D", "", v)
+            if len(d) not in DIGITS[k]:
+                continue
+            v = d
+        elif k in ("birth", "pass_date"):
+            v = v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else _iso(v)
+            if not v:
+                continue
+        elif k == "pass_code":
+            d = re.sub(r"\D", "", v)
+            if len(d) != 6:
+                continue
+            v = d[:3] + "-" + d[3:]
+        out[k] = v[:300]
+    return out
+
+
+def _recognize_openai(images: list[tuple[bytes, str]]) -> dict:
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(400, "Распознавание не настроено: укажите OPENAI_API_KEY в .env на сервере")
+    parts = []
+    for data, mime in images:
+        parts += _image_parts(data, mime)
+    body = {"model": settings.OPENAI_MODEL, "temperature": 0, "response_format": {"type": "json_object"},
+            "messages": [{"role": "system", "content": PROMPT},
+                         {"role": "user", "content": [{"type": "text", "text": f"Фото: {len(images)}. Перенеси данные и верни JSON."}] + parts}]}
+    try:
+        r = httpx.post(f"{settings.OPENAI_BASE_URL}/chat/completions", json=body, timeout=180,
+                       headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"})
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"OpenAI недоступен: {e}")
+    if r.status_code != 200:
+        detail = r.text[:300]
+        try:
+            detail = r.json().get("error", {}).get("message", detail)
+        except Exception:
+            pass
+        raise HTTPException(502, f"OpenAI: {detail}")
+    content = r.json()["choices"][0]["message"].get("content") or ""
+    try:
+        out = json.loads(content)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", content, re.S)
+        if not m:
+            raise HTTPException(502, "OpenAI не вернул данные (возможно, отказался читать документ) — заполните поля вручную")
+        out = json.loads(m.group(0))
+    fields = clean_fields(out.get("fields") or {})
+    kinds = [k if k in ("passport", "registration", "org") else "unknown" for k in (out.get("kinds") or [])][:len(images)]
+    if any(k in fields for k in ("org_name", "ogrn", "account")) and not any(k in fields for k in ("fio", "pass_number")):
+        fields["kind"] = "org"
+    elif any(k in fields for k in ("fio", "pass_number", "reg_address")):
+        fields["kind"] = "person"
+    return {"fields": fields, "kinds": kinds, "text": ""}
+
+
+def _recognize_yandex(images: list[tuple[bytes, str]]) -> dict:
     if not (settings.YANDEX_VISION_API_KEY and settings.YANDEX_FOLDER_ID):
         raise HTTPException(400, "Распознавание документов не настроено: укажите YANDEX_VISION_API_KEY и YANDEX_FOLDER_ID в .env на сервере")
     fields: dict = {}

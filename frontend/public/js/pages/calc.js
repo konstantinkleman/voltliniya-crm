@@ -222,7 +222,7 @@ async function renderEditor(main, id) {
     const mg = res.margin[tariff === 'basic' ? 'basic' : 'std'];
     resEl.innerHTML = `
       <div class="tcards">${TARIFFS.map(k => `<button type="button" class="tcard ${k === tariff ? 'on' : ''}" data-t="${k}">
-        <span>${TN[k]}</span><b>${fmt(K[k].price)}</b><small>${num(K[k].per_m2)} ₽/м² · точно ${fmt(T[k].price)}</small></button>`).join('')}</div>
+        <span>${TN[k]}</span><b>${fmt(K[k].price)}</b><small>${num(K[k].per_m2)} ₽/м²</small></button>`).join('')}</div>
       ${res.warnings.length ? `<div class="warnbox">${res.warnings.map(esc).join('<br>')}</div>` : ''}
       <div class="card pad" style="margin-top:12px">
         <h3 style="margin:0 0 8px">${TN[tariff]}: из чего цена</h3>
@@ -483,9 +483,9 @@ async function renderContract(main, id) {
     const common = st.fields.common.filter(([k]) => k !== 'advance');
     body.innerHTML = `
       <section class="cs ocr-box"><h3>Распознать документ</h3>
-        <p class="small mute" style="margin:0 0 10px">Сфотографируйте разворот паспорта с фото${kind === 'person' ? ' и страницу с пропиской' : ''} или карточку реквизитов ИП/ООО — данные подставятся в договор. Можно выбрать до 4 фото сразу. Фото не сохраняется, распознаёт Яндекс (данные остаются в России).</p>
+        <p class="small mute" style="margin:0 0 10px">Сфотографируйте разворот паспорта с фото${kind === 'person' ? ' и страницу с пропиской' : ''} или карточку реквизитов ИП/ООО — данные подставятся в договор. Можно выбрать до 4 фото сразу. Фото не сохраняется.</p>
         ${st.ocr_ready ? `<label class="btn p upl">Фото документа<input type="file" accept="image/*" multiple data-ocr hidden></label> <span class="small mute" data-ocr-status></span>`
-          : `<div class="infobox">Распознавание пока не подключено: на сервере нужен ключ Yandex Vision (YANDEX_VISION_API_KEY и YANDEX_FOLDER_ID в .env). Поля можно заполнить вручную.</div>`}
+          : `<div class="infobox">Распознавание пока не подключено: на сервере нужен ключ ${st.ocr_provider === 'yandex' ? 'Yandex Vision (YANDEX_VISION_API_KEY и YANDEX_FOLDER_ID)' : 'OpenAI (OPENAI_API_KEY — тот же, что для накладных)'} в .env. Поля можно заполнить вручную.</div>`}
       </section>
       <section class="cs"><h3>Договор</h3>
         <div class="cf-line"><span>Тариф</span><div class="seg2" data-tariff>${TARIFFS.map(t => `<button type="button" data-v="${t}" class="${st.tariff === t ? 'on' : ''}">${TN[t]}</button>`).join('')}</div></div>
