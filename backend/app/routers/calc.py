@@ -6,12 +6,12 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import calc, calc_html, calc_params
+from .. import calc, calc_html, calc_params, pdf
 from .. import models as m
 from ..auth import director
 from ..db import get_db
@@ -246,6 +246,30 @@ def _result(e: m.Estimate) -> dict:
     return calc.compute(json.loads(e.inputs or "{}"), json.loads(e.params or "{}"))
 
 
+def _doc_name(e, kind: str, t: str) -> str:
+    base = {"kp": "КП", "smeta": "Смета", "panel": "Щит"}[kind]
+    title = re.sub(r"[^\wА-Яа-яЁё\- ]+", "", e.title or "").strip().replace(" ", "_")[:40]
+    return f"{base}_ВольтЛиния{'_' + calc.TARIFF_NAMES[t].replace(' ', '_') if kind != 'kp' else ''}{'_' + title if title else ''}.pdf"
+
+
+def _pdf_response(html: str, name: str) -> Response:
+    from urllib.parse import quote
+    data = pdf.single_page(html)
+    ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"})
+
+
+@router.get("/estimates/{eid}/pdf/{kind}")
+def doc_pdf(eid: int, kind: str, tariff: str | None = None, _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """КП / смета / щит в PDF одной страницей."""
+    if kind not in ("kp", "smeta", "panel"):
+        raise HTTPException(404, "Нет такого документа")
+    e = _get(db, eid)
+    t = tariff if tariff in calc.TARIFFS else e.tariff
+    return _pdf_response(doc(eid, kind, t, _, db), _doc_name(e, kind, t))
+
+
 @router.get("/estimates/{eid}/doc/{kind}", response_class=HTMLResponse)
 def doc(eid: int, kind: str, tariff: str | None = None, _: m.User = Depends(director), db: Session = Depends(get_db)):
     e = _get(db, eid)
@@ -313,4 +337,14 @@ def public_kp(token: str, db: Session = Depends(get_db)):
                             "<p style='font:16px sans-serif;padding:24px'>Ссылка на коммерческое предложение больше не действует.</p>",
                             status_code=404)
     res = _result(e)
-    return calc_html.kp_html(res, e.updated_at.date() if e.updated_at else date.today(), public=True)
+    return calc_html.kp_html(res, e.updated_at.date() if e.updated_at else date.today(), public=True,
+                             pdf_url=f"/api/public/kp/{token}/pdf")
+
+
+@router.get("/public/kp/{token}/pdf")
+def public_kp_pdf(token: str, db: Session = Depends(get_db)):
+    e = db.scalar(select(m.Estimate).where(m.Estimate.share_token == token)) if token and len(token) >= 16 else None
+    if not e:
+        raise HTTPException(404, "КП не найдено")
+    html = calc_html.kp_html(_result(e), e.updated_at.date() if e.updated_at else date.today())
+    return _pdf_response(html, _doc_name(e, "kp", e.tariff))

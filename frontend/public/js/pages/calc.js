@@ -344,14 +344,21 @@ async function openDoc(id, kind, tariff, flush) {
   ov.className = 'docview';
   ov.innerHTML = `<div class="docbar"><button class="btn s" data-close>← Назад</button><b>${titles[kind]}</b>
     ${kind !== 'kp' ? `<div class="seg2 sm">${TARIFFS.map(t => `<button type="button" data-t="${t}" class="${t === tariff ? 'on' : ''}">${TN[t]}</button>`).join('')}</div>` : ''}
-    <button class="btn s p" data-print>Печать / PDF</button></div><iframe title="${titles[kind]}"></iframe>`;
+    <button class="btn s p" data-pdf>Скачать PDF</button></div><iframe title="${titles[kind]}"></iframe>`;
   document.body.appendChild(ov);
   document.body.style.overflow = 'hidden';
   const frame = ov.querySelector('iframe');
-  const load = async (t) => { frame.srcdoc = await api.get(`/api/estimates/${id}/doc/${kind}?tariff=${t}`); };
+  let cur = tariff;
+  const load = async (t) => { cur = t; frame.srcdoc = (await api.get(`/api/estimates/${id}/doc/${kind}?tariff=${t}`)).replace(/<button class="print"[^>]*>[^<]*<\/button>/, ''); };
   await load(tariff);
   ov.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { ov.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', x === b)); load(b.dataset.t); });
-  ov.querySelector('[data-print]').onclick = () => frame.contentWindow.print();
+  ov.querySelector('[data-pdf]').onclick = async (ev) => {
+    const b = ev.currentTarget; b.disabled = true; b.textContent = 'Готовлю PDF…';
+    const names = { kp: 'КП', smeta: 'Смета_' + TN[cur], panel: 'Щит_' + TN[cur] };
+    try { await saveFile(`/api/estimates/${id}/pdf/${kind}?tariff=${cur}`, `${names[kind]}_ВольтЛиния.pdf`.replace(/ /g, '_'), true); }
+    catch (e) { toast(e.message, true); }
+    finally { b.disabled = false; b.textContent = 'Скачать PDF'; }
+  };
   ov.querySelector('[data-close]').onclick = () => { ov.remove(); document.body.style.overflow = ''; };
 }
 
