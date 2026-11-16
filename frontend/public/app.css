@@ -9,7 +9,7 @@
   --ink:#EDF1F3;--ink2:#B7C1C9;--mute:#84919B;--act:#7FA0FF;--act-soft:#22304F;--ok:#5CC493;--ok-soft:#173A2C;--warn:#F0955F;--warn-soft:#432A1B;--copper:#D08A54;--danger:#F28B82;
 }}
 *,*::before,*::after{box-sizing:border-box}
-html,body{height:100%;margin:0}
+html,body{height:100%;margin:0;overflow-x:clip}
 body{background:var(--bg);color:var(--ink);font:14px/1.45 Manrope,"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding-top:env(safe-area-inset-top)}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
@@ -115,7 +115,7 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--surface2)}
 
 /* drawer / modal / toast */
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,100%);background:var(--surface);border-left:1px solid var(--line);box-shadow:-8px 0 30px rgba(0,0,0,.12);padding:22px 24px;padding-top:calc(22px + env(safe-area-inset-top));overflow:auto;transform:translateX(105%);transition:transform .22s ease;z-index:20}
-.drawer.open{transform:none}
+.drawer{visibility:hidden;transition:transform .22s ease,visibility 0s .22s}.drawer.open{transform:none;visibility:visible;transition:transform .22s ease}
 .drawer .x{position:absolute;right:14px;top:calc(12px + env(safe-area-inset-top));border:0;background:none;font-size:24px;color:var(--mute);line-height:1}
 .dl{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;margin:14px 0}
 .dl dt{color:var(--mute)}.dl dd{margin:0}
@@ -223,15 +223,21 @@ details.cs summary{cursor:pointer;list-style:none}details.cs summary h3{display:
 .seg2 button.on{background:var(--act);color:#fff}
 .seg2.sm button{padding:5px 9px;min-height:30px;font-size:13px}
 .toggles{display:flex;flex-wrap:wrap;gap:8px}.cs .cf-row+.toggles{margin-top:12px}
-.chip{border:1.5px solid var(--line);background:var(--surface);color:var(--ink2);border-radius:999px;padding:8px 14px;font-weight:700;font-size:14px;min-height:40px;touch-action:manipulation}
-.chip.on{border-color:var(--act);background:var(--act-soft);color:var(--act)}
-.chip.on::before{content:"✓ "}
-.chip.add{border-style:dashed;color:var(--act)}
-.chip.dim{opacity:.55}
-.toggles.sm .chip{padding:5px 11px;min-height:34px;font-size:13px}
-.quick{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.room{border:1px solid var(--line2);border-radius:10px;padding:8px;margin-bottom:8px;background:var(--surface2)}
-.room-h{display:grid;grid-template-columns:1fr 1fr 36px;gap:6px;margin-bottom:6px}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink2);border-radius:999px;padding:8px 14px 8px 10px;font-weight:700;font-size:14px;min-height:42px;touch-action:manipulation;text-align:left}
+.chip::before{content:"";flex:none;width:20px;height:20px;box-sizing:border-box;border:2px solid var(--line);border-radius:6px;background:var(--surface);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;line-height:1}
+.chip.on{border-color:var(--act);background:var(--act);color:#fff}
+.chip.on::before{content:"✓";border-color:#fff;background:#fff;color:var(--act)}
+.chip.add{border-style:dashed;color:var(--act);padding:8px 14px}
+.chip.add::before{content:none}
+.toggles.sm .chip{padding:6px 12px 6px 8px;min-height:38px;font-size:13px}
+.quick{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.add-rooms{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.add-rooms h4{margin:0 0 8px;font-size:13px;color:var(--ink2)}
+.quick .chip{justify-content:flex-start;border-radius:10px}
+.room{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px;background:var(--surface)}
+.room-h{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 36px;gap:8px;margin-bottom:8px;align-items:center}
+.room .rnote{font-size:12px;color:var(--mute);padding:4px 2px}
+.stepper-in.has input{font-weight:800;color:var(--act);background:var(--act-soft);border-color:var(--act)}
 .room-h input,.room-h select,.extra input{font:inherit;font-size:15px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);min-width:0}
 .room .x,.extra .x{border:0;background:none;font-size:22px;color:var(--mute)}
 .extra{display:grid;grid-template-columns:1fr 80px 90px 30px;gap:6px;margin-bottom:6px}
@@ -265,9 +271,10 @@ table.params input:disabled{opacity:.5}
   .cf-line{flex-direction:column;align-items:flex-start;gap:6px}
   .seg2{width:100%}.seg2 button{flex:1}
   .calc-bar{padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:6px}
-  .bar-prices{width:100%}.bar-prices button{flex:1;padding:4px 6px}.bar-prices button b{font-size:14px}
-  .bar-acts{width:100%}.bar-acts .btn{flex:1;padding:9px 6px;font-size:13px}
-  .room-h{grid-template-columns:1fr 1fr 30px}
+  .bar-prices{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.bar-prices button{min-width:0;padding:4px 6px}.bar-prices button b{font-size:13px}
+  .bar-acts{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.bar-acts .btn{min-width:0;padding:9px 4px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .calc-main{padding-bottom:190px!important}
+  .room-h{grid-template-columns:minmax(0,1fr) 30px}.room-h select{grid-column:1 / -1;grid-row:2}
   .extra{grid-template-columns:1fr 60px 70px 26px}
   .docbar{gap:6px}.docbar b{display:none}.docbar .seg2{order:3;width:100%}.docbar [data-print]{margin-left:auto}
 }
@@ -289,4 +296,6 @@ table.params tr.chk td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
 table.params .chk-tag{display:inline-block;font-size:11px;font-weight:800;color:var(--warn);background:var(--warn-soft);border-radius:6px;padding:1px 6px;margin-right:6px}
 table.params input.txt{width:100%;min-width:240px;text-align:left}
 @media (max-width:640px){.contract .cf-grid{grid-template-columns:1fr}}
+/* iPhone: поля 16px — иначе Safari увеличивает страницу при вводе и её можно двигать вбок */
+@media (max-width:1000px){input,select,textarea,.room-h input,.room-h select,.extra input,table.params input{font-size:16px!important}}
 

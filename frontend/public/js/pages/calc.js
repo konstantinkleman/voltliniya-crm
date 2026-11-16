@@ -38,6 +38,7 @@ async function renderList(main) {
 // ---------- редактор ----------
 const POINTS = [['sockets', 'Розетки 220 В'], ['lv', 'Слаботочные розетки'], ['switches', 'Выключатели (все типы)'], ['lights', 'Выводы под освещение'], ['out220', 'Выводы 220 В (без силовых)']];
 const APPL = [['oven', 'Духовка'], ['hob', 'Варочная панель'], ['dishwasher', 'Посудомойка'], ['washer', 'Стиральная'], ['dryer', 'Сушильная'], ['apron', 'Розетки фартука'], ['fridge', 'СВЧ + холодильник'], ['flow', 'Проточный водонагреватель'], ['boiler', 'Накопительный водонагреватель'], ['neptun', 'Нептун'], ['router', 'Роутер / модем'], ['media', 'Мультимедийный щит']];
+const OWN_LINES = ['Кухня', 'Санузел'];     // розетки кухни и санузла считаются своими линиями
 const QUICK_ROOMS = [['Комната', 'Спальня'], ['Комната', 'Детская'], ['Гостиная', 'Гостиная'], ['Кухня-гостиная', 'Кухня-гостиная'], ['Кухня', 'Кухня'], ['Прихожая / коридор', 'Прихожая'], ['Санузел', 'Санузел'], ['Гардеробная', 'Гардеробная'], ['Балкон / лоджия', 'Балкон'], ['Другое', '']];
 
 async function renderEditor(main, id) {
@@ -88,7 +89,7 @@ async function renderEditor(main, id) {
 
   // --- поля формы ---
   const numField = (key, label, opts = {}) => `<label class="cf ${opts.wide ? 'wide' : ''}"><span>${esc(label)}</span>
-    <span class="stepper-in">${opts.noStep ? '' : `<button type="button" data-dec="${key}" aria-label="меньше">−</button>`}<input type="number" inputmode="${opts.dec ? 'decimal' : 'numeric'}" step="any" min="0" data-k="${key}" value="${inp[key] === null || inp[key] === undefined ? '' : esc(+inp[key] || (opts.blankZero ? '' : 0))}" placeholder="${esc(opts.ph ?? '0')}">${opts.noStep ? '' : `<button type="button" data-inc="${key}" aria-label="больше">+</button>`}</span>
+    <span class="stepper-in ${+inp[key] > 0 ? 'has' : ''}">${opts.noStep ? '' : `<button type="button" data-dec="${key}" aria-label="меньше">−</button>`}<input type="number" inputmode="${opts.dec ? 'decimal' : 'numeric'}" step="any" min="0" data-k="${key}" value="${inp[key] === null || inp[key] === undefined ? '' : esc(+inp[key] || (opts.blankZero ? '' : 0))}" placeholder="${esc(opts.ph ?? '0')}">${opts.noStep ? '' : `<button type="button" data-inc="${key}" aria-label="больше">+</button>`}</span>
     ${opts.hint ? `<small ${opts.hintAttr || ''}>${esc(opts.hint)}</small>` : ''}</label>`;
   const seg = (key, options) => `<div class="seg2" data-seg="${key}">${options.map(([v, l]) => `<button type="button" data-v="${esc(v)}" class="${String(inp[key]) === String(v) ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
   const chip = (key, label) => `<button type="button" class="chip ${inp[key] ? 'on' : ''}" data-chip="${key}">${esc(label)}</button>`;
@@ -106,7 +107,8 @@ async function renderEditor(main, id) {
       <section class="cs"><h3>Помещения <span class="mute small" data-rooms-count></span></h3>
         <p class="small mute" style="margin:0 0 8px">По помещениям считаются линии света, розеток, тёплые полы, кондиционеры, санузлы и подписи в щите.</p>
         <div data-rooms></div>
-        <div class="quick">${QUICK_ROOMS.map(([t, n], i) => `<button type="button" class="chip add" data-addroom="${i}">+ ${esc(n || t)}</button>`).join('')}</div>
+        <div class="add-rooms"><h4>Добавить помещение</h4>
+          <div class="quick">${QUICK_ROOMS.map(([t, n], i) => `<button type="button" class="chip add" data-addroom="${i}">+ ${esc(n || t)}</button>`).join('')}</div></div>
       </section>
       <section class="cs"><h3>Щит</h3>
         <div class="cf-line"><span>Ввод</span>${seg('phase', [['3', '3 фазы'], ['1', '1 фаза']])}</div>
@@ -146,15 +148,15 @@ async function renderEditor(main, id) {
         <select data-rf="type" aria-label="Тип">${['', ...defs.room_types].map(t => `<option value="${esc(t)}" ${t === r.type ? 'selected' : ''}>${esc(t || '— тип —')}</option>`).join('')}</select>
         <button type="button" class="x" data-delroom aria-label="Удалить">×</button></div>
       <div class="toggles sm">
-        <button type="button" class="chip ${r.sockets ? 'on' : ''} ${['Санузел', 'Кухня'].includes(r.type) ? 'dim' : ''}" data-rt="sockets" title="${['Санузел', 'Кухня'].includes(r.type) ? 'У санузла и кухни своя линия не считается' : ''}">Линия розеток</button>
+        ${OWN_LINES.includes(r.type) ? '' : `<button type="button" class="chip ${r.sockets ? 'on' : ''}" data-rt="sockets">Линия розеток</button>`}
         <button type="button" class="chip ${r.floor ? 'on' : ''}" data-rt="floor">Тёплый пол</button>
         <button type="button" class="chip ${r.ac ? 'on' : ''}" data-rt="ac">Кондиционер</button>
-      </div></div>`).join('') || '<div class="small mute" style="padding:6px 0">Добавьте помещения кнопками ниже.</div>';
+      </div>${OWN_LINES.includes(r.type) ? `<div class="rnote">Розетки ${r.type === 'Кухня' ? 'кухни' : 'санузла'} — своими линиями, считаются автоматически</div>` : ''}</div>`).join('') || '<div class="small mute" style="padding:6px 0">Помещений пока нет — добавьте ниже.</div>';
     box.querySelectorAll('[data-room]').forEach(el => {
       const i = Number(el.dataset.room);
       el.querySelectorAll('[data-rf]').forEach(f => f.addEventListener(f.tagName === 'SELECT' ? 'change' : 'input', () => {
         inp.rooms[i][f.dataset.rf] = f.value;
-        if (f.dataset.rf === 'type') drawRooms();
+        if (f.dataset.rf === 'type') { inp.rooms[i].sockets = !OWN_LINES.includes(f.value); drawRooms(); }
         schedule();
       }));
       el.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => { inp.rooms[i][b.dataset.rt] = !inp.rooms[i][b.dataset.rt]; b.classList.toggle('on'); schedule(); });
@@ -180,13 +182,14 @@ async function renderEditor(main, id) {
       const k = el.dataset.k;
       if (el.type === 'number') inp[k] = el.value === '' ? (['kup', 'hob_len', 'flow_len'].includes(k) ? null : 0) : Number(el.value);
       else inp[k] = el.value;
+      el.closest('.stepper-in')?.classList.toggle('has', +inp[k] > 0);
       schedule();
     }));
     const step = (k, d) => {
       const el = form.querySelector(`input[data-k="${k}"]`);
       const base = el.value === '' ? (k === 'kup' ? res.volumes.su : 0) : Number(el.value);
       const v = Math.max(0, base + d);
-      el.value = v; inp[k] = v; schedule();
+      el.value = v; inp[k] = v; el.closest('.stepper-in')?.classList.toggle('has', v > 0); schedule();
     };
     form.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => step(b.dataset.inc, 1));
     form.querySelectorAll('[data-dec]').forEach(b => b.onclick = () => step(b.dataset.dec, -1));
@@ -207,9 +210,9 @@ async function renderEditor(main, id) {
       const [type, name] = QUICK_ROOMS[Number(b.dataset.addroom)];
       const same = name ? (inp.rooms || []).filter(r => r.name === name || (r.name || '').startsWith(name + ' ')).length : 0;
       const nm = same ? `${name} ${same + 1}` : name;
-      const living = ['Комната', 'Гостиная', 'Кухня-гостиная'].includes(type);
-      inp.rooms = [...(inp.rooms || []), { name: nm, type, sockets: living, floor: false, ac: false }];
+      inp.rooms = [...(inp.rooms || []), { name: nm, type, sockets: !OWN_LINES.includes(type), floor: false, ac: false }];
       drawRooms(); schedule();
+      form.querySelector('[data-rooms] .room:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
     form.querySelector('[data-addextra]').onclick = () => { inp.extra.push({ name: '', qty: 1, price: 0 }); drawExtra(); };
   }
