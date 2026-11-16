@@ -92,6 +92,17 @@ async def main():
         await tp.goto(BASE + pg.url[pg.url.index('/#'):]); await tp.wait_for_selector(".tcards"); await tp.wait_for_timeout(500)
         await tp.screenshot(path=f"{OUT}/t01-calc.png")
         await tp.screenshot(path=f"{OUT}/t02-calc-full.png", full_page=True)
+        # PDF одной страницей (КП и смета) — сохраняются рядом со скриншотами для просмотра
+        for kind in ("kp", "smeta"):
+            r = await tp.request.get(BASE + f"/api/estimates/{int(pg.url.split('#/calc/')[1].split('/')[0].split('?')[0])}/pdf/{kind}?tariff=std",
+                                     headers={"Authorization": "Bearer " + tok})
+            assert r.ok and r.headers["content-type"] == "application/pdf", (kind, r.status)
+            body = await r.body()
+            open(f"{OUT}/pdf-{kind}.pdf", "wb").write(body)
+            from pypdf import PdfReader
+            import io as _io
+            pr = PdfReader(_io.BytesIO(body))
+            assert len(pr.pages) == 1 and float(pr.pages[0].mediabox.height) < 3000 * 72 / 25.4, f"{kind}: {len(pr.pages)} стр."
         # договор с планшета: данные заказчика, суммы, пакет документов
         eid = int(pg.url.split("#/calc/")[1].split("/")[0].split("?")[0])
         await tp.click("[data-contract]"); await tp.wait_for_selector(".contract [data-f=fio]"); await tp.wait_for_timeout(400)

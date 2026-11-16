@@ -122,6 +122,27 @@ with c:
     e5 = ok(c.post("/api/estimates", json={"inputs": ex["inputs"], "lead_id": lead["id"]}))
     assert not ok(c.get(f"/api/estimates/{e5['id']}"))["params_outdated"]
 
+    # PDF одной страницей: КП, смета, щит; КП по публичной ссылке
+    from pypdf import PdfReader as _PR0
+    import io as _io0
+    for kind in ("kp", "smeta", "panel"):
+        r = c.get(f"/api/estimates/{e5['id']}/pdf/{kind}", params={"tariff": "std"})
+        assert r.status_code == 200 and r.headers["content-type"] == "application/pdf", (kind, r.status_code, r.text[:200])
+        pr = _PR0(_io0.BytesIO(r.content))
+        h_mm = float(pr.pages[0].mediabox.height) * 25.4 / 72
+        assert len(pr.pages) == 1 and abs(float(pr.pages[0].mediabox.width) * 25.4 / 72 - 210) < 1, (kind, len(pr.pages))
+        assert 100 < h_mm < 3000, (kind, h_mm)
+        print(f"pdf {kind}: 1 страница, {h_mm:.0f} мм")
+    assert c.get(f"/api/estimates/{e5['id']}/pdf/zzz").status_code == 404
+    tok5 = ok(c.post(f"/api/estimates/{e5['id']}/share"))["token"]
+    with TestClient(main.app) as anon:
+        pub = anon.get(f"/api/public/kp/{tok5}")
+        assert f"/api/public/kp/{tok5}/pdf" in pub.text and "Скачать PDF" in pub.text
+        rp = anon.get(f"/api/public/kp/{tok5}/pdf")
+        assert rp.status_code == 200 and rp.content[:4] == b"%PDF"
+        assert anon.get("/api/public/kp/xxxxxxxxxxxxxxxxxxxxxxxx/pdf").status_code == 404
+    ok(c.delete(f"/api/estimates/{e5['id']}/share"))
+
     # договор по расчёту (пакет ИП): данные по умолчанию из заявки, суммы = КП
     st = ok(c.get(f"/api/estimates/{e5['id']}/contract"))
     assert st["data"]["kind"] == "person" and st["data"]["address"] == "ЖК Шагал" and not st["saved"] and not st["ocr_ready"]

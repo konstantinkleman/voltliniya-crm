@@ -57,7 +57,7 @@ table.est tr.grp td{font-weight:700;background:var(--soft)}
 table.est td.fl{text-align:center;font-weight:800}
 .foot{margin-top:16px;font-size:13px;color:var(--ink2)}
 .foot p{margin:4px 0}
-.print{display:block;margin:0 auto;padding:22px 0 30px;background:none;border:0;color:var(--navy);font-weight:700;font-size:14px;text-decoration:underline;cursor:pointer}
+.print{display:block;width:max-content;margin:0 auto;padding:22px 0 30px;background:none;border:0;color:var(--navy);font-weight:700;font-size:14px;text-decoration:underline;cursor:pointer}
 @media (max-width:680px){
   .top{padding:16px 16px 14px}.body{padding:16px}
   .contacts{text-align:left}
@@ -90,8 +90,11 @@ def qty(x: float) -> str:
     return f"{x:,.2f}".replace(",", " ").replace(".", ",")
 
 
-def page(title: str, body: str, printable: bool = True) -> str:
-    btn = '<button class="print" onclick="window.print()">Сохранить PDF / печать</button>' if printable else ""
+def page(title: str, body: str, printable: bool = True, pdf_url: str | None = None) -> str:
+    if pdf_url:      # PDF одной страницей с сервера — без разрывов по листам A4
+        btn = f'<a class="print" href="{escape(pdf_url)}" download>Скачать PDF</a>'
+    else:
+        btn = '<button class="print" onclick="window.print()">Сохранить PDF / печать</button>' if printable else ""
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<meta name="robots" content="noindex,nofollow"><title>{escape(title)}</title><style>{CSS}</style></head>'
             f'<body><div class="page">{header()}<div class="body">{body}</div>{btn}</div></body></html>')
@@ -103,7 +106,7 @@ def header() -> str:
             f'<div class="contacts">черновой электромонтаж<br><a href="tel:{tel}">{PHONE}</a> · <a href="https://{SITE}">{SITE}</a></div></div>')
 
 
-def kp_html(res: dict, when: date | None = None, public: bool = False) -> str:
+def kp_html(res: dict, when: date | None = None, public: bool = False, pdf_url: str | None = None) -> str:
     k = calc.kp(res)
     tcards = []
     for t in k["tariffs"]:
@@ -131,7 +134,7 @@ def kp_html(res: dict, when: date | None = None, public: bool = False) -> str:
             f'<div class="cards">{cards}</div>'
             f'<div class="opt"><span>Опция к «Базовому» и «Стандарту»: 3D-тур квартиры с трассами кабеля</span><b>{money(k["tour_option"])} ₽</b></div>'
             f'<div class="cond"><b>Условия</b>{cond}</div><div class="date">Дата предложения: {when:%d.%m.%Y}</div>{cta}')
-    return page("КП — ВольтЛиния" + (f" — {k['object']}" if k["object"] else ""), body)
+    return page("КП — ВольтЛиния" + (f" — {k['object']}" if k["object"] else ""), body, pdf_url=pdf_url)
 
 
 def smeta_html(res: dict, tariff: str, when: date | None = None) -> str:
