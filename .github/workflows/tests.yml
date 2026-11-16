@@ -39,6 +39,8 @@ jobs:
 
   e2e-calc:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       UPLOAD_DIR: ./uploads
       ADMIN_EMAIL: d@test.ru
@@ -68,3 +70,9 @@ jobs:
         with:
           name: calc-shots
           path: shots
+      - name: screenshots to branch ci-shots (for review)
+        if: always() && github.ref != 'refs/heads/main'
+        run: |
+          cd shots && git init -q && git checkout -q -b ci-shots && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "shots ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-shots
