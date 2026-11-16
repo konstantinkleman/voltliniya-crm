@@ -1,14 +1,14 @@
-"""Пакет документов договора на фикстурах калькулятора: без БД и FastAPI.
+"""Пакет документов ИП по фикстурам калькулятора: без БД и FastAPI.
 
 PYTHONPATH=. python tests/contract_test.py
-Сверка с исходным сформировать_документы.py (по Excel) — tests/excel_check/README.md, раздел «Договор».
+Сверка текстов с исходным make_ip_docs.py — tests/excel_check/README.md, раздел «Договор».
 """
 import io
 import json
 import pathlib
 import re
-import zipfile
 
+import docx
 import openpyxl
 
 from app import calc, contract
@@ -17,70 +17,99 @@ from app.calc_defaults import DEFAULTS
 P = {k: {"v1": v1, "v2": v2, "v3": v3, "vtext": vt} for (k, s, l, u, v1, v2, v3, n, vt) in DEFAULTS}
 fx = json.loads((pathlib.Path(__file__).parent / "calc_fixtures.json").read_text())
 CON = {"contractor.address": "Адрес ИП", "contractor.account": "40802810000000000001", "contractor.bank": "Банк",
-       "contractor.corr": "30101810000000000002", "contractor.bik": "044500001"}
-PERSON = {"kind": "person", "number": "1611/26", "date": "2026-11-16", "start": "2026-11-23", "end": "2026-12-14",
-          "address": "Москва, ул. Тестовая, 1", "fio": "Иванов Иван Иванович", "birth": "1985-03-04", "pass_series": "4510",
-          "pass_number": "123456", "pass_issued": "ГУ МВД", "pass_date": "2015-06-07", "pass_code": "770-001",
+       "contractor.corr": "30101810000000000002", "contractor.bik": "044500001", "contractor.phone": "+7 900 000-00-01",
+       "contractor.email": "ip@example.com"}
+BASE = {"number": "1611/26", "date": "2026-11-16", "end": "2026-12-16", "address": "Москва, ул. Тестовая, 1"}
+PERSON = {**BASE, "kind": "person", "fio": "Иванова Анна Сергеевна", "birth": "1985-03-04", "pass_series": "4510",
+          "pass_number": "123456", "pass_issued": "ГУ МВД РОССИИ ПО Г. МОСКВЕ", "pass_date": "2015-06-07", "pass_code": "770-001",
           "reg_address": "Москва, ул. Регистрационная, 1", "phone": "+7 900 000-00-00", "email": "a@b.ru"}
-ORG = {"kind": "org", "number": "1711/26", "date": "2026-11-17", "start": "2026-11-24", "end": "2026-12-15",
-       "address": "Москва, ул. Офисная, 2", "org_name": "ООО «Тест»", "ogrn": "1027700000000", "inn": "7700000000",
-       "kpp": "770001001", "legal_address": "Москва, ул. Юридическая, 5", "signer": "генерального директора Петрова Петра Петровича",
-       "basis": "Устава", "sign_name": "Петров П.П.", "account": "40702810000000000001", "bank": "ПАО Банк",
-       "corr": "30101810000000000002", "bik": "044500000", "org_phone": "+7 900 111-11-11", "org_email": "o@b.ru"}
-ALLOWED = {"[1/2]", "[2 (двух)]"}
+ORG = {**BASE, "kind": "org", "org_name": "ООО «Тест»", "ogrn": "1027700000000", "inn": "7700000000", "kpp": "770001001",
+       "legal_address": "Москва, ул. Юридическая, 5", "signer": "генерального директора Петрова Петра Петровича", "basis": "Устава",
+       "account": "40702810000000000001", "bank": "ПАО Банк", "corr": "30101810000000000002", "bik": "044500000",
+       "org_phone": "+7 900 111-11-11"}
+IP = {**BASE, "kind": "ip", "org_name": "Денисов Денис Денисович", "ogrn": "321000000000000", "inn": "770000000000",
+      "legal_address": "Москва", "account": "40802810000000000009", "bank": "Банк", "corr": "30101810000000000002", "bik": "044500000",
+      "org_phone": "+7 900 222-22-22", "materials": "customer"}
 
 
-def text(docx: bytes) -> tuple[str, str]:
-    xml = zipfile.ZipFile(io.BytesIO(docx)).read("word/document.xml").decode()
-    return xml, re.sub(r"<[^>]+>", "", xml)
+def text(b: bytes) -> str:
+    d = docx.Document(io.BytesIO(b))
+    return "\n".join([p.text for p in d.paragraphs] + [c.text for t in d.tables for r in t.rows for c in r.cells])
 
 
-assert contract.num2words(359455) == "триста пятьдесят девять тысяч четыреста пятьдесят пять"
-assert contract.num2words(2001) == "две тысячи один" and contract.num2words(21000) == "двадцать одна тысяча"
-assert contract.rub_words(30000) == "30 000 (тридцать тысяч) рублей"
-assert contract.short_fio("Иванов Иван Иванович") == "Иванов И.И."
-assert contract.date_words("2026-11-16") == "«16» ноября 2026 г." and contract.fmt_date("2026-01-05") == "05.01.2026"
+assert contract.money(310573.81) == "310 573 (триста десять тысяч пятьсот семьдесят три) рубля 81 копейка"
+assert contract.money(21000) == "21 000 (двадцать одна тысяча) рублей 00 копеек"
+assert contract.add_month(contract.parse_date("2026-01-31")).isoformat() == "2026-02-28"
+assert contract.parse_pages("9-11, 14") == [9, 10, 11, 14] and contract.parse_pages("") is None
+
+# минимальный PDF для приложения с дизайн-проектом
+from reportlab.pdfgen import canvas  # noqa: E402
+_b = io.BytesIO()
+_c = canvas.Canvas(_b)
+for _ in range(3):
+    _c.drawString(100, 700, "plan")
+    _c.showPage()
+_c.save()
+PDF = _b.getvalue()
 
 bad = []
 n = 0
-for i, f in enumerate(fx[:60]):
+for i, f in enumerate(fx[:40]):
     res = calc.compute(f["inputs"], P)
     for t in calc.TARIFFS:
-        for data in (PERSON, ORG):
+        for data in (PERSON, ORG, IP):
             n += 1
-            N = contract.numbers(res, t)
-            files = contract.build(res, t, data, CON)
-            assert list(files)[0].startswith("01_Договор_") and len(files) == 7
-            xml, tx = text(files[next(k for k in files if k.startswith("01_"))])
-            left = set(re.findall(r"\[[^\[\]]*\]", tx)) - ALLOWED
-            if left or "{{C_" in xml:
-                bad.append(f"{i}/{t}/{data['kind']}: в договоре остались места {left}")
-            if contract.fmt_money(N["price"]) not in tx or contract.num2words(N["price"]) not in tx:
-                bad.append(f"{i}/{t}: цены {N['price']} нет в договоре")
-            if N["rest"] != N["price"] - N["advance"] - N["stage2"] or N["advance"] % 1000:
-                bad.append(f"{i}/{t}: суммы {N}")
-            if (t == "turnkey") != (N["stage2"] > 0 and "Этап 2" in tx):
-                bad.append(f"{i}/{t}: этап 2")
+            design = PDF if (i + n) % 4 == 0 else None
+            if design:
+                data = {**data, "design_sheets": "листы 1–2", "design_pages": "1-2"}
+            files = contract.build(res, t, data, CON, design)
+            N = contract.numbers(res, t, data.get("materials", "executor"))
+            names = list(files)
+            M = data.get("materials", "executor") == "executor"
+            want = ["01", "02"] + (["03"] if M else []) + (["0" + str(4 if M else 3)] if design else [])
+            if [x[:2] for x in names[:len(want)]] != want or ("Акт" not in names[-1]):
+                bad.append(f"{i}/{t}/{data['kind']}: состав пакета {names}")
+            tx = text(files[names[0]])
+            if "[___]" in tx or re.search(r"\{\w+\}", tx):
+                bad.append(f"{i}/{t}/{data['kind']}: в договоре пропуски/ссылки: {re.findall(r'.{30}(?:\[___\]|\{\w+\}).{10}', tx)[:3]}")
+            if contract.money(N["total"]) not in tx:
+                bad.append(f"{i}/{t}: цены {N['total']} нет в договоре")
+            if M and abs(N["total"] - res["kp"][t]["price"]) > 0.005:
+                bad.append(f"{i}/{t}: цена договора {N['total']} ≠ КП {res['kp'][t]['price']}")
+            if (t == "turnkey") != ("Второй этап Работ" in tx):
+                bad.append(f"{i}/{t}: второй этап")
             if (t == "basic") != ("по фактически выполненному объёму" in tx):
                 bad.append(f"{i}/{t}: цена «Базового»")
-            # смета: строка итога = цена договора, сумма строк ≈ итогу
-            ws = openpyxl.load_workbook(io.BytesIO(files["02_Приложение_1_Смета.xlsx"])).active
-            tot = next(r for r in ws.iter_rows() if str(r[0].value or "").startswith("ИТОГО ЦЕНА"))
-            lines = sum((r[3].value or 0) * (r[4].value or 0) for r in ws.iter_rows(min_row=10) if isinstance(r[0].value, int))
-            if tot[5].value != N["price"] or abs(lines - N["price"]) > 1:
-                bad.append(f"{i}/{t}: смета {tot[5].value} / строки {lines:.2f} / цена {N['price']}")
-            # спецификация: в разделе щита — только аппараты и корпуса
-            ws = openpyxl.load_workbook(io.BytesIO(files["03_Приложение_2_Спецификация.xlsx"])).active
-            names = [r[1].value for r in ws.iter_rows() if isinstance(r[0].value, int)]
-            if any(x in names for x in ("Оклейка окон и дверей, уборка", "Вынос строительного мусора")):
-                bad.append(f"{i}/{t}: условия тарифа попали в щит")
-            panel = [x for x in N["smeta"]["sections"][1]["panel"]]
-            if not all(p["name"] in names for p in panel):
-                bad.append(f"{i}/{t}: не все аппараты щита в спецификации")
-            _, kv = text(files["07_Квитанции.docx"])
-            if contract.fmt_money(N["advance"]) not in kv or contract.fmt_money(N["rest"]) not in kv:
-                bad.append(f"{i}/{t}: квитанции")
-            openpyxl.load_workbook(io.BytesIO(files["08_Щит_для_монтажника.xlsx"]))
+            if f"{contract.mwords(contract.GUAR[t])}" not in tx:
+                bad.append(f"{i}/{t}: гарантия")
+            if t != "basic" and f"до {contract.mwords(contract.LIMIT[t])} переносов" not in tx:
+                bad.append(f"{i}/{t}: бесплатные изменения")
+            if design and "дизайн-проектом (листы 1–2)" not in tx:
+                bad.append(f"{i}/{t}: пункт о дизайн-проекте")
+            if data["kind"] == "person" and "гражданка РФ **" not in tx and "гражданка РФ Иванова" not in tx:
+                bad.append(f"{i}/{t}: род заказчика")
+            ws = openpyxl.load_workbook(io.BytesIO(files[names[1]])).active
+            s = sum(r[5].value for r in ws.iter_rows(min_row=9) if isinstance(r[0].value, int))
+            if abs(s - N["works_sum"]) > 0.01:
+                bad.append(f"{i}/{t}: смета работ {s} ≠ {N['works_sum']}")
+            if M:
+                ws = openpyxl.load_workbook(io.BytesIO(files[names[2]])).active
+                s = sum(r[5].value for r in ws.iter_rows(min_row=9) if isinstance(r[0].value, int))
+                if abs(s - N["mat_sum"]) > 0.01:
+                    bad.append(f"{i}/{t}: спецификация {s} ≠ {N['mat_sum']}")
+            acts = [k for k in names if "Акт" in k]
+            if len(acts) != (2 if t == "turnkey" else 1):
+                bad.append(f"{i}/{t}: акты {acts}")
+            for a in acts:
+                at = text(files[a])
+                if "{" in at or "[___]" in at:
+                    bad.append(f"{i}/{t}: в акте пропуски")
+            if design:
+                from pypdf import PdfReader
+                pr = PdfReader(io.BytesIO(files[next(k for k in names if k.endswith(".pdf"))]))
+                if len(pr.pages) != 2 or "Приложение" not in pr.pages[0].extract_text():
+                    bad.append(f"{i}/{t}: штамп на PDF")
+    openpyxl.load_workbook(io.BytesIO(contract.panel_xlsx(res, "std")))
 
 for b in bad[:30]:
     print(b)

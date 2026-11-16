@@ -320,10 +320,13 @@ def shown(x) -> float:
     return xround(float(x or 0), 2)
 
 
+def _ls(ln) -> float:
+    return round(shown(ln["qty"]) * shown(ln["price"]), 2)
+
+
 def smeta_price(sm: dict) -> float:
-    """Итог = сумма строк сметы в напечатанном виде, до рубля: так сходятся смета, КП и договор."""
-    return xround(sum(shown(ln["qty"]) * shown(ln["price"]) for s in sm["sections"]
-                      for ln in s["lines"] + s.get("panel", []) if ln["qty"] > 0))
+    """Итог = сумма строк сметы в напечатанном виде (кол-во и цена до копеек), с копейками — так сходятся КП и договор."""
+    return round(sum(_ls(ln) for s in sm["sections"] for ln in s["lines"] + s.get("panel", []) if ln["qty"] > 0), 2)
 
 
 def kp_numbers(res: dict, S: float) -> dict:
@@ -333,8 +336,9 @@ def kp_numbers(res: dict, S: float) -> dict:
     for t in TARIFFS:
         sm = smeta(res, t)
         price = smeta_price(sm)
-        mats = xround(next(x["total"] for x in sm["sections"] if x["title"].endswith("Материалы")))
-        out[t] = {"price": price, "works": price - mats, "materials": mats, "per_m2": xround(price / S) if S else 0}
+        ms = next(x for x in sm["sections"] if x["title"].endswith("Материалы"))
+        mats = round(sum(_ls(ln) for ln in ms["lines"] + ms.get("panel", []) if ln["qty"] > 0), 2)
+        out[t] = {"price": price, "works": round(price - mats, 2), "materials": mats, "per_m2": xround(price / S) if S else 0}
     return out
 
 

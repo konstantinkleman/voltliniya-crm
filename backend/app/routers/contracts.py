@@ -1,4 +1,4 @@
-"""Договор по расчёту: данные заказчика, пакет документов (договор + приложения), распознавание паспорта/реквизитов."""
+"""Договор по расчёту (пакет ИП из «Договоры_ИП»): данные заказчика, дизайн-проект PDF, документы, распознавание паспорта/реквизитов."""
 import json
 import os
 import re
@@ -19,9 +19,12 @@ from ..db import get_db
 
 router = APIRouter(prefix="/api", tags=["contracts"])
 
-TEXT_FIELDS = {k for k, _ in contract.PERSON_FIELDS + contract.ORG_FIELDS + contract.COMMON_FIELDS} | {"kind"}
+TEXT_FIELDS = {k for k, _ in contract.PERSON_FIELDS + contract.ORG_FIELDS + contract.COMMON_FIELDS} | {"kind", "materials"}
+KINDS = ("person", "ip", "org")
 MIME = {".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".zip": "application/zip"}
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".zip": "application/zip",
+        ".pdf": "application/pdf"}
+PANEL_FILE = "Щит_для_монтажника.xlsx"
 
 
 def _get(db: Session, eid: int) -> m.Estimate:
@@ -31,22 +34,42 @@ def _get(db: Session, eid: int) -> m.Estimate:
     return e
 
 
+def _design_path(eid: int) -> str:
+    return os.path.join(settings.UPLOAD_DIR, "estimates", str(eid), "design.pdf")
+
+
+def _design(eid: int) -> bytes | None:
+    p = _design_path(eid)
+    if os.path.exists(p):
+        with open(p, "rb") as f:
+            return f.read()
+    return None
+
+
 def _data(e: m.Estimate) -> dict:
     saved = json.loads(e.contract or "{}") if e.contract else {}
     base = contract.default_data(e.lead, json.loads(e.inputs or "{}"))
     base.update({k: v for k, v in saved.items() if k in TEXT_FIELDS})
+    if base.get("kind") not in KINDS:
+        base["kind"] = "person"
     return base
+
+
+def _res(e: m.Estimate) -> dict:
+    return calc.compute(json.loads(e.inputs or "{}"), json.loads(e.params or "{}"))
 
 
 def _state(e: m.Estimate, db: Session) -> dict:
     data = _data(e)
-    res = calc.compute(json.loads(e.inputs or "{}"), json.loads(e.params or "{}"))
-    n = contract.numbers(res, e.tariff, data.get("advance"))
-    n.pop("smeta")
+    N = contract.numbers(_res(e), e.tariff, data.get("materials", "executor"))
     con = calc_params.contractor(db)
-    return {"estimate_id": e.id, "lead_id": e.lead_id, "title": e.title, "tariff": e.tariff, "data": data, "numbers": n,
-            "missing": contract.missing(data, con), "saved": bool(e.contract),
-            "fields": {"common": contract.COMMON_FIELDS, "person": contract.PERSON_FIELDS, "org": contract.ORG_FIELDS},
+    design = os.path.exists(_design_path(e.id))
+    nums = {k: N[k] for k in ("tariff", "tariff_name", "M", "works_sum", "stage2_sum", "mat_sum", "total", "warranty", "limit",
+                              "mech", "brand")}
+    return {"estimate_id": e.id, "lead_id": e.lead_id, "title": e.title, "tariff": e.tariff, "data": data, "numbers": nums,
+            "missing": contract.missing(data, con, design), "saved": bool(e.contract), "design": design,
+            "fields": {"common": contract.COMMON_FIELDS, "person": contract.form_fields("person"),
+                       "ip": contract.form_fields("ip"), "org": contract.form_fields("org")},
             "ocr_ready": doc_ocr.ready(), "ocr_provider": doc_ocr.provider()}
 
 
@@ -63,16 +86,11 @@ class ContractIn(BaseModel):
 @router.put("/estimates/{eid}/contract")
 def save_contract(eid: int, body: ContractIn, _: m.User = Depends(director), db: Session = Depends(get_db)):
     e = _get(db, eid)
-    clean = {}
-    for k, v in body.data.items():
-        if k not in TEXT_FIELDS:
-            continue
-        if k == "advance":
-            clean[k] = None if v in (None, "") else max(0, round(calc.num(v)))
-        else:
-            clean[k] = str(v or "").strip()[:500]
-    if clean.get("kind") not in ("person", "org"):
+    clean = {k: str(v or "").strip()[:500] for k, v in body.data.items() if k in TEXT_FIELDS}
+    if clean.get("kind") not in KINDS:
         clean["kind"] = "person"
+    if clean.get("materials") not in ("executor", "customer"):
+        clean["materials"] = "executor"
     e.contract = json.dumps(clean, ensure_ascii=False)
     if body.tariff in calc.TARIFFS:
         e.tariff = body.tariff
@@ -81,10 +99,34 @@ def save_contract(eid: int, body: ContractIn, _: m.User = Depends(director), db:
     return _state(e, db)
 
 
+@router.post("/estimates/{eid}/contract/design")
+async def upload_design(eid: int, file: UploadFile = File(...), _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Дизайн-проект (PDF) — станет Приложением № 3 со штампом на выбранных страницах."""
+    e = _get(db, eid)
+    data = await file.read()
+    if data[:4] != b"%PDF":
+        raise HTTPException(400, "Нужен PDF")
+    if len(data) > 60 * 1024 * 1024:
+        raise HTTPException(413, "PDF больше 60 МБ")
+    p = _design_path(e.id)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(data)
+    return _state(e, db)
+
+
+@router.delete("/estimates/{eid}/contract/design")
+def delete_design(eid: int, _: m.User = Depends(director), db: Session = Depends(get_db)):
+    e = _get(db, eid)
+    try:
+        os.remove(_design_path(e.id))
+    except OSError:
+        pass
+    return _state(e, db)
+
+
 def _files(e: m.Estimate, db: Session) -> dict[str, bytes]:
-    data = _data(e)
-    res = calc.compute(json.loads(e.inputs or "{}"), json.loads(e.params or "{}"))
-    return contract.build(res, e.tariff, data, calc_params.contractor(db))
+    return contract.build(_res(e), e.tariff, _data(e), calc_params.contractor(db), _design(e.id))
 
 
 def _download(name: str, content: bytes) -> Response:
@@ -96,8 +138,10 @@ def _download(name: str, content: bytes) -> Response:
 
 @router.get("/estimates/{eid}/contract/files")
 def contract_files(eid: int, name: str | None = None, _: m.User = Depends(director), db: Session = Depends(get_db)):
-    """Без name — весь пакет одним zip; с name — один файл пакета."""
+    """Без name — пакет для заказчика одним zip; с name — один файл (в т. ч. «Щит для монтажника»)."""
     e = _get(db, eid)
+    if name == PANEL_FILE:
+        return _download(name, contract.panel_xlsx(_res(e), e.tariff))
     files = _files(e, db)
     if name:
         if name not in files:
@@ -109,11 +153,17 @@ def contract_files(eid: int, name: str | None = None, _: m.User = Depends(direct
 
 @router.get("/estimates/{eid}/contract/list")
 def contract_list(eid: int, _: m.User = Depends(director), db: Session = Depends(get_db)):
-    names = list(_files(_get(db, eid), db))
-    return [{"name": n, "title": re.sub(r"^\d+_", "", os.path.splitext(n)[0]).replace("_", " ")} for n in names]
+    names = list(_files(_get(db, eid), db)) + [PANEL_FILE]
+    return [{"name": n, "title": re.sub(r"_\d+-\d+.*$|_\d{4}-\d{2}.*$", "", re.sub(r"^\d+_", "", os.path.splitext(n)[0])).replace("_", " ")
+             + ("" if n != PANEL_FILE else " (не для заказчика)")} for n in names]
 
 
-DOC_KIND = {"01": "contract", "02": "appendix", "03": "appendix", "05": "act"}
+def _doc_kind(name: str) -> str:
+    if "Договор" in name:
+        return "contract"
+    if "Акт" in name:
+        return "act"
+    return "appendix"
 
 
 @router.post("/estimates/{eid}/contract/to-lead")
@@ -138,7 +188,7 @@ def contract_to_lead(eid: int, user: m.User = Depends(director), db: Session = D
         with open(path, "wb") as f:
             f.write(content)
         title = re.sub(r"^\d+_", "", os.path.splitext(name)[0]).replace("_", " ")
-        db.add(m.Document(lead_id=e.lead_id, kind=DOC_KIND.get(name[:2], "other"), title=(title + mark)[:300], filename=name,
+        db.add(m.Document(lead_id=e.lead_id, kind=_doc_kind(name), title=(title + mark)[:300], filename=name,
                           path=path, mime=MIME.get(os.path.splitext(name)[1]), size=len(content), user_id=user.id))
     db.add(m.LeadActivity(lead_id=e.lead_id, kind="note", user_id=user.id,
                           text=f"Сформирован договор № {num} ({calc.TARIFF_NAMES[e.tariff]}) — {len(files)} файлов в документах"))

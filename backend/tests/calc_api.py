@@ -122,44 +122,63 @@ with c:
     e5 = ok(c.post("/api/estimates", json={"inputs": ex["inputs"], "lead_id": lead["id"]}))
     assert not ok(c.get(f"/api/estimates/{e5['id']}"))["params_outdated"]
 
-    # договор по расчёту: данные по умолчанию из заявки, суммы как на листе «Договор»
+    # договор по расчёту (пакет ИП): данные по умолчанию из заявки, суммы = КП
     st = ok(c.get(f"/api/estimates/{e5['id']}/contract"))
     assert st["data"]["kind"] == "person" and st["data"]["address"] == "ЖК Шагал" and not st["saved"] and not st["ocr_ready"]
-    n = st["numbers"]
-    assert n["price"] + 0 == round(n["price"]) and n["rest"] == n["price"] - n["advance"] - n["stage2"] and n["advance"] % 1000 == 0
-    assert "Фамилия Имя Отчество" in st["missing"] and not any(x.startswith("Реквизиты исполнителя") for x in st["missing"])
-    person = {"kind": "person", "number": "1611/26", "date": "2026-11-16", "start": "2026-11-23", "end": "2026-12-14",
+    assert st["data"]["end"] > st["data"]["date"] and not st["design"]
+    assert "Фамилия Имя Отчество" in st["missing"] and "Реквизиты исполнителя: телефон" in st["missing"]
+    ok(c.patch("/api/calc/params/contractor.phone", json={"vtext": "+7 900 000-00-01"}))
+    ok(c.patch("/api/calc/params/contractor.email", json={"vtext": "ip@example.com"}))
+    person = {"kind": "person", "number": "1611/26", "date": "2026-11-16", "end": "2026-12-14",
               "address": "Москва, ул. Тестовая, 1, кв. 2", "fio": "Иванов Иван Иванович", "birth": "1985-03-04",
               "pass_series": "4510", "pass_number": "123456", "pass_issued": "ГУ МВД РОССИИ ПО Г. МОСКВЕ", "pass_date": "2015-06-07",
-              "pass_code": "770-001", "reg_address": "Москва, ул. Регистрационная, 1", "phone": "+7 900 000-00-00", "advance": 50000,
-              "junk": "x"}
+              "pass_code": "770-001", "reg_address": "Москва, ул. Регистрационная, 1", "phone": "+7 900 000-00-00", "junk": "x"}
     st = ok(c.put(f"/api/estimates/{e5['id']}/contract", json={"data": person, "tariff": "turnkey"}))
-    assert st["saved"] and st["tariff"] == "turnkey" and "junk" not in st["data"] and st["numbers"]["advance"] == 50000
-    assert st["numbers"]["stage2"] > 0 and st["numbers"]["guarantee"] == 60 and st["numbers"]["limit"] == 8
-    assert not [x for x in st["missing"] if not x.startswith("Реквизиты исполнителя")], st["missing"]
+    n = st["numbers"]
+    assert st["saved"] and st["tariff"] == "turnkey" and "junk" not in st["data"] and n["M"]
+    assert n["stage2_sum"] > 0 and n["warranty"] == 60 and n["limit"] == 8 and abs(n["total"] - n["works_sum"] - n["mat_sum"]) < 0.01
+    kp = ok(c.get(f"/api/estimates/{e5['id']}"))["result"]["kp"]["turnkey"]["price"]
+    assert abs(kp - n["total"]) < 0.005, (kp, n["total"])
+    assert not st["missing"], st["missing"]
     lst = ok(c.get(f"/api/estimates/{e5['id']}/contract/list"))
-    assert [f["name"][:2] for f in lst] == ["01", "02", "03", "05", "06", "07", "08"], lst
+    names = [f["name"] for f in lst]
+    assert [x[:2] for x in names[:5]] == ["01", "02", "03", "04", "05"] and "этап_2" in names[4] and names[-1] == "Щит_для_монтажника.xlsx", names
     import io as _io, re as _re, zipfile as _zf
+    import docx as _docx
     zr = c.get(f"/api/estimates/{e5['id']}/contract/files")
     assert zr.status_code == 200 and zr.headers["content-type"] == "application/zip"
     z = _zf.ZipFile(_io.BytesIO(zr.content))
-    doc = z.read("01_Договор_1611-26.docx")
-    xml = _zf.ZipFile(_io.BytesIO(doc)).read("word/document.xml").decode()
-    text = _re.sub(r"<[^>]+>", "", xml)
-    assert "Иванов Иван Иванович" in text and "Тестовый адрес ИП" in text and "40802810000000000001" in text and "{{C_" not in xml
-    assert "пятьдесят тысяч" in text and "60 (шестьдесят) месяцев" in text and "до 8 изменений" in text and "Этап 2" in text
-    assert "«16» ноября 2026 г." in text and "«14» декабря 2026 г." in text
-    left = _re.findall(r"\[[^\[\]]*\]", text)
-    assert set(left) <= {"[1/2]", "[2 (двух)]", "[___]"} and left.count("[___]") == 1, left   # не задан только e-mail заказчика
-    one = c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "02_Приложение_1_Смета.xlsx"})
+    assert "Щит_для_монтажника.xlsx" not in z.namelist() and len(z.namelist()) == 5, z.namelist()
+    d = _docx.Document(_io.BytesIO(z.read(names[0])))
+    text = "\n".join([p.text for p in d.paragraphs] + [cl.text for t in d.tables for r in t.rows for cl in r.cells])
+    assert "Иванов Иван Иванович" in text and "Тестовый адрес ИП" in text and "40802810000000000001" in text and "ip@example.com" in text
+    assert "60 (шестьдесят) месяцев" in text and "до 8 (восемь) переносов" in text and "Второй этап Работ" in text
+    assert "«16» ноября 2026 г." in text and "14 декабря 2026 г." in text and "гражданин РФ" in text
+    assert "[___]" not in text and not _re.search(r"\{\w+\}", text)
+    one = c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": names[1]})
     assert one.status_code == 200 and "spreadsheetml" in one.headers["content-type"]
+    assert c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "Щит_для_монтажника.xlsx"}).status_code == 200
     assert c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": "../x"}).status_code == 404
+    # дизайн-проект PDF → Приложение № 3 со штампом
+    from reportlab.pdfgen import canvas as _cv
+    _b = _io.BytesIO(); _c = _cv.Canvas(_b); _c.drawString(100, 700, "plan"); _c.showPage(); _c.drawString(100, 700, "plan2"); _c.save()
+    assert c.post(f"/api/estimates/{e5['id']}/contract/design", files={"file": ("x.png", b"\x89PNG", "image/png")}).status_code == 400
+    st = ok(c.post(f"/api/estimates/{e5['id']}/contract/design", files={"file": ("p.pdf", _b.getvalue(), "application/pdf")}))
+    assert st["design"] and "Дизайн-проект: какие листы" in st["missing"]
+    ok(c.put(f"/api/estimates/{e5['id']}/contract", json={"data": {**person, "design_sheets": "листы 1–2", "design_pages": "2"}}))
+    names = [f["name"] for f in ok(c.get(f"/api/estimates/{e5['id']}/contract/list"))]
+    assert "Приложение_3_Дизайн-проект" in names[3], names
+    pdf = c.get(f"/api/estimates/{e5['id']}/contract/files", params={"name": names[3]})
+    from pypdf import PdfReader as _PR
+    pr = _PR(_io.BytesIO(pdf.content))
+    assert len(pr.pages) == 1 and "Приложение № 3" in pr.pages[0].extract_text() and "plan2" in pr.pages[0].extract_text()
     # в документы заявки; повтор заменяет прежний пакет
     ok(c.post(f"/api/estimates/{e5['id']}/contract/to-lead"))
     ok(c.post(f"/api/estimates/{e5['id']}/contract/to-lead"))
     L = ok(c.get(f"/api/leads/{lead['id']}"))
     docs = [d for d in L["documents"] if d["title"].endswith(f"расчёт {e5['id']}")]
-    assert len(docs) == 7 and {d["kind"] for d in docs} >= {"contract", "appendix", "act"}, docs
+    assert len(docs) == 6 and {d["kind"] for d in docs} == {"contract", "appendix", "act"}, docs
+    ok(c.delete(f"/api/estimates/{e5['id']}/contract/design"))
     # распознавание: без ключа — понятная ошибка; с ключом — ответ OpenAI проверяется и нормализуется
     rr = c.post("/api/contract/recognize", files=[("files", ("p.jpg", b"\xff\xd8\xff", "image/jpeg"))])
     assert rr.status_code == 400 and "OPENAI_API_KEY" in rr.text, rr.text

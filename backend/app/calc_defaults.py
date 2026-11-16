@@ -122,10 +122,12 @@ DEFAULTS = [
     ('general.brand', 'general', 'Автоматика щита по умолчанию для нового расчёта', '', None, None, None, 'Dekraft или ABB — в расчёте можно переключить', 'ABB'),
     ('general.area', 'general', 'Площадь по умолчанию для нового расчёта', 'м²', 60, None, None, None, None),
     # реквизиты исполнителя для договора: в шаблонах вместо них метки {{C_*}}; банк, к/с и БИК — общедоступные данные банка,
-    # адрес ИП и расчётный счёт в публичный репозиторий не кладём — вписываются в CRM («Расценки», последний блок)
+    # адрес ИП, расчётный счёт, телефон и e-mail в публичный репозиторий не кладём — вписываются в CRM («Расценки», последний блок)
     ('contractor.address', 'contractor', 'Адрес ИП (как в ЕГРИП)', '', None, None, None, None, None),
     ('contractor.account', 'contractor', 'Расчётный счёт', '', None, None, None, None, None),
     ('contractor.bank', 'contractor', 'Банк', '', None, None, None, 'общедоступные реквизиты банка', 'Филиал «Центральный» Банка ВТБ (ПАО)'),
     ('contractor.corr', 'contractor', 'Корр. счёт', '', None, None, None, 'общедоступные реквизиты банка', '30101810145250000411'),
     ('contractor.bik', 'contractor', 'БИК', '', None, None, None, 'общедоступные реквизиты банка', '044525411'),
+    ('contractor.phone', 'contractor', 'Телефон для договора', '', None, None, None, None, None),
+    ('contractor.email', 'contractor', 'E-mail для договора', '', None, None, None, None, None),
 ]
