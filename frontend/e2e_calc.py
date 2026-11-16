@@ -124,7 +124,7 @@ async def main():
         dp = await dctx.new_page()
         dp.on("pageerror", lambda e: errors.append("pageerror(desktop): " + str(e)))
         await dp.goto(BASE + "/#/login"); await dp.evaluate(f"localStorage.setItem('token', {tok!r})")
-        await dp.goto(BASE + "/#/calc"); await dp.wait_for_selector("table, .empty"); await dp.wait_for_timeout(300)
+        await dp.goto(BASE + "/#/calc"); await dp.wait_for_selector(".est-list, .empty"); await dp.wait_for_timeout(300)
         await dp.screenshot(path=f"{OUT}/d01-list.png")
         await dp.goto(BASE + "/#/calc/params"); await dp.wait_for_selector("table.params"); await dp.wait_for_timeout(300)
         await dp.screenshot(path=f"{OUT}/d02-params.png", full_page=True)

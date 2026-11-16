@@ -5,8 +5,8 @@ export async function render(main, r, state) {
   const D = state.dicts;
   const users = await api.get('/api/users');
   main.innerHTML = `<div class="head"><div><h1>Настройки</h1><p>Пользователи и правила расчёта</p></div><button class="btn p" data-new>Новый пользователь</button></div>
-  <div class="card pad" style="margin-bottom:14px"><h2>Пользователи</h2><table style="margin-top:8px"><tr><th>Имя</th><th>E-mail</th><th>Роли</th><th></th></tr>
-    ${users.map(u => `<tr><td>${esc(u.name)}${u.id === state.me.id ? ' <span class="small mute">(вы)</span>' : ''}</td><td>${esc(u.email)}</td><td>${u.is_director ? '<span class="tag act">директор</span> ' : ''}${u.is_foreman ? '<span class="tag">прораб</span>' : ''}${!u.is_active ? ' <span class="tag warn">закрыт</span>' : ''}</td><td class="r"><button class="btn s" data-edit="${u.id}">Изменить</button></td></tr>`).join('')}</table></div>
+  <div class="card pad" style="margin-bottom:14px"><h2>Пользователи</h2><div class="wrap"><table style="margin-top:8px"><tr><th>Имя</th><th>E-mail</th><th>Роли</th><th></th></tr>
+    ${users.map(u => `<tr><td>${esc(u.name)}${u.id === state.me.id ? ' <span class="small mute">(вы)</span>' : ''}</td><td>${esc(u.email)}</td><td>${u.is_director ? '<span class="tag act">директор</span> ' : ''}${u.is_foreman ? '<span class="tag">прораб</span>' : ''}${!u.is_active ? ' <span class="tag warn">закрыт</span>' : ''}</td><td class="r"><button class="btn s" data-edit="${u.id}">Изменить</button></td></tr>`).join('')}</table></div></div>
   <div class="card pad"><h2>Правила расчёта</h2><table style="margin-top:8px">
     <tr><td>Доля бригады от стоимости работ</td><td class="r num">${num(Number(D.crew_share) * 100)}%</td></tr>
     <tr><td>Зарплата прораба</td><td class="r">распределяется поровну на его объекты месяца сделки</td></tr>

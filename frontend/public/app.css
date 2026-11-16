@@ -298,4 +298,14 @@ table.params input.txt{width:100%;min-width:240px;text-align:left}
 @media (max-width:640px){.contract .cf-grid{grid-template-columns:1fr}}
 /* iPhone: поля 16px — иначе Safari увеличивает страницу при вводе и её можно двигать вбок */
 @media (max-width:1000px){input,select,textarea,.room-h input,.room-h select,.extra input,table.params input{font-size:16px!important}}
+/* список расчётов карточками — без горизонтальной прокрутки на телефоне */
+.est-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.est{display:block;text-decoration:none;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
+.est:hover{border-color:var(--act)}
+.est-h{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.est-p{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+.est-p span{border:1px solid var(--line2);border-radius:8px;padding:5px 7px;font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.est-p span small{display:block;font-size:11px;color:var(--mute);font-weight:700}
+.est-p span.on{border-color:var(--act);background:var(--act-soft)}
+@media (max-width:640px){.est-list{grid-template-columns:1fr}}
 
