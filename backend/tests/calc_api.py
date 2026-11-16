@@ -30,7 +30,7 @@ with c:
     # заявка → новый расчёт: объект и площадь из заявки
     lead = ok(c.post("/api/leads", json={"name": "Антон, ЖК Шагал", "source": "profi", "area_m2": 60, "address": "ЖК Шагал"}))
     e = ok(c.post("/api/estimates", json={"lead_id": lead["id"]}))
-    assert e["lead_id"] == lead["id"] and e["result"]["inputs"]["area"] == 60 and "ЖК Шагал" in e["result"]["inputs"]["object"]
+    assert e["lead_id"] == lead["id"] and e["result"]["inputs"]["area"] == 60 and e["result"]["inputs"]["object"] == "ЖК Шагал"
 
     # данные замера из примера Excel → цены как в файле
     ex = fx[0]

@@ -150,7 +150,7 @@ def create_estimate(data: EstimateIn, user: m.User = Depends(director), db: Sess
         lead = db.get(m.Lead, data.lead_id)
         if not lead:
             raise HTTPException(404, "Заявка не найдена")
-        inputs["object"] = ", ".join(x for x in (lead.address, lead.name) if x)
+        inputs["object"] = lead.address or lead.name
         if lead.area_m2:
             inputs["area"] = float(lead.area_m2)
     if data.inputs:

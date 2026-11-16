@@ -79,6 +79,7 @@ async function renderEditor(main, id) {
       setStatus('Сохранено');
       const pm = form.querySelector('[data-flowmode]'); if (pm) pm.textContent = res.volumes.flow_mode !== '—' ? 'исполнение: ' + res.volumes.flow_mode : '';
       const kh = form.querySelector('[data-kup-hint]'); if (kh) kh.textContent = `по умолчанию = санузлов (${res.volumes.su})`;
+      const ki = form.querySelector('input[data-k=kup]'); if (ki) ki.placeholder = String(res.volumes.su);
     } catch (e) { setStatus('Не сохранено'); toast(e.message, true); }
     finally { inflight--; }
   }
@@ -203,8 +204,8 @@ async function renderEditor(main, id) {
     });
     form.querySelectorAll('[data-addroom]').forEach(b => b.onclick = () => {
       const [type, name] = QUICK_ROOMS[Number(b.dataset.addroom)];
-      const same = (inp.rooms || []).filter(r => r.type === type).length;
-      const nm = name && same && type !== 'Другое' ? `${name} ${same + 1}` : name;
+      const same = name ? (inp.rooms || []).filter(r => r.name === name || (r.name || '').startsWith(name + ' ')).length : 0;
+      const nm = same ? `${name} ${same + 1}` : name;
       const living = ['Комната', 'Гостиная', 'Кухня-гостиная'].includes(type);
       inp.rooms = [...(inp.rooms || []), { name: nm, type, sockets: living, floor: false, ac: false }];
       drawRooms(); schedule();
