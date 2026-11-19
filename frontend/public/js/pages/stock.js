@@ -45,8 +45,8 @@ export async function render(main, r, state) {
     <div class="card pad kpi"><div class="l">${esc(wh.name)}${wh.foreman_name ? ' · ' + esc(wh.foreman_name) : ''}</div><div class="v num">${fmt(wh.value)}</div><div class="d">${wh.positions} позиций по средней себестоимости</div></div>
     <div class="card pad kpi"><div class="l">Все склады</div><div class="v num">${fmt(total)}</div><div class="d">${whs.length} ${whs.length === 1 ? 'склад' : 'склада'}</div></div>
     <button type="button" class="card pad kpi kpi-btn ${lowOpen ? 'on' : ''}" data-lowtoggle ${lowList.length ? '' : 'disabled'} aria-expanded="${lowOpen && lowList.length ? 'true' : 'false'}"><div class="l">Ниже минимума</div><div class="v num ${lowList.length ? 'warn' : ''}">${lowList.length}</div><div class="d">${lowList.length ? (lowOpen ? '▾ скрыть список' : '▸ показать, что докупить') : 'всё в норме'}</div></button>
-    <div class="card pad kpi"><div class="l">В пути</div><div class="v num">${wh.pending_in}</div><div class="d">${wh.pending_in ? '<a href="#" data-pending>подтвердить получение</a>' : 'перемещений нет'}</div></div></div>
-  ${lowOpen && lowList.length ? lowPanel(wh, lowList) : ''}` : ''}
+    <div class="card pad kpi"><div class="l">В пути</div><div class="v num">${wh.pending_in}</div><div class="d">${wh.pending_in ? '<a href="#" data-pending>подтвердить получение</a>' : 'перемещений нет'}</div></div>
+    ${lowOpen && lowList.length ? lowPanel(wh, lowList) : ''}</div>` : ''}
   <div class="wh"><div class="card pad tree">
     <button class="${!catSel ? 'on' : ''}" data-cat="">Все позиции<span class="c">${prods.length}</span></button>
     ${renderTree(null, 0)}

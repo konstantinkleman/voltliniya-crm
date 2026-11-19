@@ -425,7 +425,7 @@ tr.exp-det>td{background:var(--surface2);padding:4px 14px 14px}
 .kpi-btn:disabled{cursor:default}
 .kpi-btn .d{color:var(--act)}
 .kpi-btn:disabled .d{color:var(--ink2)}
-.low-panel{margin-bottom:14px;padding:12px 14px;border-color:var(--warn)}
+.low-panel{grid-column:1 / -1;padding:12px 14px;border-color:var(--warn)}
 .low-h{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px}
 .low-t td,.low-t th{white-space:normal}
 @media (max-width:640px){
@@ -440,3 +440,5 @@ tr.exp-det>td{background:var(--surface2);padding:4px 14px 14px}
   table.low-t td:nth-child(5){display:none}
   .low-h .row{width:100%}
 }
+/* на телефоне «Ниже минимума» и список — первыми */
+@media (max-width:560px){.kpi-btn{order:-2}.low-panel{order:-1}}
