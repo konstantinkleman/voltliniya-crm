@@ -417,3 +417,26 @@ tr.exp-det>td{background:var(--surface2);padding:4px 14px 14px}
   .exp-ln-t>span:nth-child(2),.exp-ln-t>span:nth-child(3){display:none}
   .exp-ln>span:last-child{text-align:right}
 }
+
+/* Склад: «Ниже минимума» раскрывает список «Нужно докупить» */
+.kpi-btn{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.kpi-btn:hover:not(:disabled){border-color:var(--warn)}
+.kpi-btn.on:not(:disabled){border-color:var(--warn);box-shadow:inset 0 -3px 0 var(--warn)}
+.kpi-btn:disabled{cursor:default}
+.kpi-btn .d{color:var(--act)}
+.kpi-btn:disabled .d{color:var(--ink2)}
+.low-panel{margin-bottom:14px;padding:12px 14px;border-color:var(--warn)}
+.low-h{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px}
+.low-t td,.low-t th{white-space:normal}
+@media (max-width:640px){
+  table.low-t,table.low-t tbody{display:block}
+  table.low-t tr:first-child{display:none}
+  table.low-t tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 8px;padding:9px 0;border-bottom:1px solid var(--line2)}
+  table.low-t td{display:block;border:0;padding:0;text-align:left!important}
+  table.low-t td:nth-child(1){grid-column:1 / -1}
+  table.low-t td:nth-child(2)::before{content:"Остаток";display:block;font-size:11px;color:var(--mute);font-weight:600}
+  table.low-t td:nth-child(3)::before{content:"Минимум";display:block;font-size:11px;color:var(--mute);font-weight:600}
+  table.low-t td:nth-child(4)::before{content:"Докупить";display:block;font-size:11px;color:var(--mute);font-weight:600}
+  table.low-t td:nth-child(5){display:none}
+  .low-h .row{width:100%}
+}

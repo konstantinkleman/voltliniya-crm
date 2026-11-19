@@ -44,13 +44,15 @@ class WarehouseIn(BaseModel):
 def _wh_out(db: Session, w: m.Warehouse, bal: dict) -> WarehouseOut:
     o = WarehouseOut.model_validate(w)
     o.foreman_name = w.foreman.name if w.foreman else None
-    mine = {k: v for k, v in bal.items() if k[0] == w.id and v[0] > 0}
-    prods = {p.id: p for p in db.scalars(select(m.Product).where(m.Product.id.in_([k[1] for k in mine]))).all()} if mine else {}
+    seen = {k: v for k, v in bal.items() if k[0] == w.id}      # позиции, которые бывали на этом складе
+    prods = {p.id: p for p in db.scalars(select(m.Product).where(m.Product.id.in_([k[1] for k in seen]))).all()} if seen else {}
     # удалённые (скрытые) позиции не считаются ни в стоимости, ни в числе позиций склада
-    mine = {k: v for k, v in mine.items() if k[1] in prods and prods[k[1]].is_active}
+    seen = {k: v for k, v in seen.items() if k[1] in prods and prods[k[1]].is_active}
+    mine = {k: v for k, v in seen.items() if v[0] > 0}
     o.value = S.q2(sum((q * c for q, c in mine.values()), Decimal(0)))
     o.positions = len(mine)
-    o.low = sum(1 for (wid, pid), (q, _) in mine.items() if prods.get(pid) and prods[pid].min_qty and q < prods[pid].min_qty)
+    # ниже минимума — в том числе закончившиеся (остаток 0), если позиция на этом складе была
+    o.low = sum(1 for (wid, pid), (q, _) in seen.items() if prods[pid].min_qty and q < prods[pid].min_qty)
     o.pending_in = db.scalar(select(m.StockMovement).where(m.StockMovement.warehouse_id == w.id, m.StockMovement.confirmed == False).limit(1)) is not None and \
         len(db.scalars(select(m.StockMovement.id).where(m.StockMovement.warehouse_id == w.id, m.StockMovement.confirmed == False)).all())  # noqa: E712
     return o
@@ -169,6 +171,7 @@ class ProductOut(ORM):
     is_active: bool
     # остатки по складам: {warehouse_id: {qty, avg_cost, value}}
     stock: dict[int, dict] = {}
+    last_cost: Decimal | None = None   # цена последней закупки (для «Нужно докупить»)
     total_qty: Decimal = Decimal(0)
     total_value: Decimal = Decimal(0)
     price: Decimal | None = None      # цена клиенту от средней себестоимости по всем складам
@@ -198,10 +201,13 @@ def _cat_path(db: Session, cats: dict[int, m.Category], cid: int | None) -> str:
 
 def _products_out(db: Session, prods: list[m.Product], bal: dict, wh_ids: set[int] | None) -> list[ProductOut]:
     cats = {c.id: c for c in db.scalars(select(m.Category)).all()}
+    last = {pid: c for pid, c in db.execute(select(m.StockMovement.product_id, m.StockMovement.unit_cost).where(
+        m.StockMovement.kind.in_(("receipt", "import")), m.StockMovement.unit_cost > 0).order_by(m.StockMovement.date, m.StockMovement.id))}
     out = []
     for p in prods:
         o = ProductOut.model_validate(p)
         o.category_path = _cat_path(db, cats, p.category_id)
+        o.last_cost = last.get(p.id)
         tq = Decimal(0); tv = Decimal(0)
         for (wid, pid), (q, c) in bal.items():
             if pid != p.id or (wh_ids is not None and wid not in wh_ids):
@@ -595,12 +601,13 @@ def summary(_: m.User = Depends(director), db: Session = Depends(get_db)):
     by_wh = {}
     low = []
     for (wid, pid), (q, c) in bal.items():
-        if q <= 0 or (pid in prods and not prods[pid].is_active):
-            continue
-        by_wh.setdefault(wid, Decimal(0)); by_wh[wid] += q * c
         p = prods.get(pid)
-        if p and p.min_qty and q < p.min_qty:
-            low.append({"warehouse": whs[wid].name if wid in whs else wid, "product": p.name, "qty": q, "min_qty": p.min_qty, "unit": p.unit})
+        if not p or not p.is_active or (wid in whs and not whs[wid].is_active):
+            continue
+        if p.min_qty and q < p.min_qty:
+            low.append({"warehouse": whs[wid].name if wid in whs else wid, "product": p.name, "qty": max(q, Decimal(0)), "min_qty": p.min_qty, "unit": p.unit})
+        if q > 0:
+            by_wh.setdefault(wid, Decimal(0)); by_wh[wid] += q * c
     pending = db.scalars(select(m.StockMovement).where(m.StockMovement.confirmed == False)).all()  # noqa: E712
     return {
         "total_value": S.q2(sum(by_wh.values(), Decimal(0))),

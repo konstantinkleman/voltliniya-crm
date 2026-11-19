@@ -12,7 +12,7 @@ import * as settings from './pages/settings.js';
 
 // Версия стилей. Если браузер открыл старую страницу из кэша (со ссылкой на прежний app.css),
 // подключаем актуальный файл сами — скрипты сверяются с сервером всегда, а index.html раньше кэшировался.
-export const CSS_V = '20261119a';
+export const CSS_V = '20261119b';
 (() => {
   const links = [...document.querySelectorAll('link[rel="stylesheet"]')].filter(l => /\/app\.css/.test(l.getAttribute('href') || ''));
   if (links.some(l => l.getAttribute('href').includes('v=' + CSS_V))) return;
