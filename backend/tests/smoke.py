@@ -196,6 +196,16 @@ with c:
     adj = post("/api/stock/adjust", json={"warehouse_id": wh["id"], "lines": [{"product_id": p1["id"], "actual_qty": 295}]})
     assert len(adj) == 1 and float(adj[0]["qty"]) == -5
     sm = get("/api/stock/summary"); assert len(sm["low"]) >= 1 and float(sm["total_value"]) > 0, sm
+    # «Нужно докупить»: ниже минимума, в том числе закончившиеся; цена последней закупки
+    wg = post("/api/stock/products", json={"name": "Клеммы Wago 221-413", "unit": "шт", "min_qty": 100})
+    low0 = [w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]["low"]
+    post("/api/stock/receipt", json={"warehouse_id": wh["id"], "date": f"{M}-13", "lines": [{"product_id": wg["id"], "qty": 40, "unit_cost": 25}]})
+    assert [w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]["low"] == low0 + 1
+    wgp = [x for x in get(f"/api/stock/products?warehouse_id={wh['id']}") if x["id"] == wg["id"]][0]
+    assert float(wgp["last_cost"]) == 25 and float(wgp["stock"][str(wh["id"])]["qty"]) == 40, wgp
+    post("/api/stock/adjust", json={"warehouse_id": wh["id"], "lines": [{"product_id": wg["id"], "actual_qty": 0}]})
+    assert [w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]["low"] == low0 + 1   # закончилась — всё ещё «докупить»
+    assert any(l["product"] == "Клеммы Wago 221-413" and float(l["qty"]) == 0 for l in get("/api/stock/summary")["low"])
     # прораб видит только свой склад и может списать на свой объект
     c3 = TestClient(main.app)
     r = c3.post("/api/auth/login", data={"username": "new@test.ru", "password": "secret123"}); c3.headers["Authorization"] = "Bearer " + r.json()["access_token"]

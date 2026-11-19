@@ -5,6 +5,9 @@ import { esc, fmt, num, dateRu, toast, openDrawer, closeDrawer, openModal, close
 let S, D, whs = [], cats = [], prods = [], whSel = null, catSel = null, query = '';
 // сортировка списка позиций: name | cost (себестоимость за ед.) | value (стоимость остатка); dir 1/-1
 let sortKey = 'name', sortDir = 1;
+// раскрыт ли список «Нужно докупить» (запоминается в браузере)
+let lowOpen = false;
+try { lowOpen = localStorage.getItem('stock.lowOpen') === '1'; } catch {}
 // раскрытые категории в таблице склада (запоминаются в браузере)
 let openCats = new Set();
 try { openCats = new Set(JSON.parse(localStorage.getItem('stock.open') || '[]')); } catch {}
@@ -31,6 +34,7 @@ export async function render(main, r, state) {
   prods = await api.get('/api/stock/products' + (whSel ? '?warehouse_id=' + whSel : ''));
   const wh = whs.find(w => w.id === whSel);
   const total = whs.reduce((a, w) => a + Number(w.value), 0);
+  const lowList = whSel ? lowItems(whSel) : [];
   const list = prods.filter(p => (!catSel || catSubtree(catSel).has(p.category_id)) && (!query || p.name.toLowerCase().includes(query.toLowerCase())));
 
   main.innerHTML = `<div class="head"><div><h1>Склад</h1><p>У каждого прораба свой склад; приход проводит директор. Остатки считаются проводками</p></div>
@@ -40,8 +44,9 @@ export async function render(main, r, state) {
   ${wh ? `<div class="grid g4" style="margin-bottom:14px">
     <div class="card pad kpi"><div class="l">${esc(wh.name)}${wh.foreman_name ? ' · ' + esc(wh.foreman_name) : ''}</div><div class="v num">${fmt(wh.value)}</div><div class="d">${wh.positions} позиций по средней себестоимости</div></div>
     <div class="card pad kpi"><div class="l">Все склады</div><div class="v num">${fmt(total)}</div><div class="d">${whs.length} ${whs.length === 1 ? 'склад' : 'склада'}</div></div>
-    <div class="card pad kpi"><div class="l">Ниже минимума</div><div class="v num ${wh.low ? 'warn' : ''}">${wh.low}</div><div class="d">пора докупить на этот склад</div></div>
-    <div class="card pad kpi"><div class="l">В пути</div><div class="v num">${wh.pending_in}</div><div class="d">${wh.pending_in ? '<a href="#" data-pending>подтвердить получение</a>' : 'перемещений нет'}</div></div></div>` : ''}
+    <button type="button" class="card pad kpi kpi-btn ${lowOpen ? 'on' : ''}" data-lowtoggle ${lowList.length ? '' : 'disabled'} aria-expanded="${lowOpen && lowList.length ? 'true' : 'false'}"><div class="l">Ниже минимума</div><div class="v num ${lowList.length ? 'warn' : ''}">${lowList.length}</div><div class="d">${lowList.length ? (lowOpen ? '▾ скрыть список' : '▸ показать, что докупить') : 'всё в норме'}</div></button>
+    <div class="card pad kpi"><div class="l">В пути</div><div class="v num">${wh.pending_in}</div><div class="d">${wh.pending_in ? '<a href="#" data-pending>подтвердить получение</a>' : 'перемещений нет'}</div></div>
+    ${lowOpen && lowList.length ? lowPanel(wh, lowList) : ''}</div>` : ''}
   <div class="wh"><div class="card pad tree">
     <button class="${!catSel ? 'on' : ''}" data-cat="">Все позиции<span class="c">${prods.length}</span></button>
     ${renderTree(null, 0)}
@@ -51,6 +56,9 @@ export async function render(main, r, state) {
     : emptyState(prods.length ? 'Ничего не найдено' : 'Номенклатуры пока нет', prods.length ? 'Измените фильтр или поиск.' : 'Нажмите «Приход» — позиции можно создать прямо в накладной, или «Новая позиция».')}</div></div>`;
 
   main.querySelectorAll('[data-wh]').forEach(b => b.onclick = () => { whSel = Number(b.dataset.wh); render(main, r, S); });
+  main.querySelector('[data-lowtoggle]')?.addEventListener('click', () => { lowOpen = !lowOpen; try { localStorage.setItem('stock.lowOpen', lowOpen ? '1' : ''); } catch {} render(main, r, S); });
+  main.querySelector('[data-lowcopy]')?.addEventListener('click', () => copyLow(wh, lowList));
+  main.querySelector('[data-lowbuy]')?.addEventListener('click', () => receiptModal(main, r, lowList.map(x => ({ product_id: x.p.id, qty: x.buy, unit_cost: x.cost }))));
   main.querySelectorAll('tr[data-tcat]').forEach(tr => tr.onclick = () => { const k = tr.dataset.tcat; openCats.has(k) ? openCats.delete(k) : openCats.add(k); saveOpen(); render(main, r, S); });
   main.querySelector('[data-expand]')?.addEventListener('click', () => { const all = ['none', ...cats.map(c => String(c.id))]; const allOpen = all.every(k => openCats.has(k)); openCats = allOpen ? new Set() : new Set(all); saveOpen(); render(main, r, S); });
   main.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const k = th.dataset.sort; sortDir = sortKey === k ? -sortDir : (k === 'name' ? 1 : -1); sortKey = k; try { localStorage.setItem('stock.sort', JSON.stringify({ k: sortKey, d: sortDir })); } catch {} render(main, r, S); });
@@ -68,6 +76,36 @@ export async function render(main, r, state) {
   main.querySelectorAll('[data-prod]').forEach(a => a.onclick = (e) => { e.preventDefault(); prodDrawer(main, r, Number(a.dataset.prod)); });
   main.querySelectorAll('[data-issue]').forEach(b => b.onclick = () => issueModal(main, r, Number(b.dataset.issue)));
 }
+
+// ---------- «Нужно докупить»: позиции склада ниже минимального остатка (включая закончившиеся) ----------
+function lowItems(wid) {
+  return prods.filter(p => p.min_qty && Number(p.min_qty) > 0 && p.stock[wid] && Number(p.stock[wid].qty) < Number(p.min_qty)).map(p => {
+    const qty = Math.max(Number(p.stock[wid].qty), 0), min = Number(p.min_qty), lack = min - qty;
+    const pack = Number(p.pack_qty) || 0;
+    const packs = pack ? Math.ceil(lack / pack - 1e-9) : 0;
+    const buy = pack ? +(packs * pack).toFixed(3) : +lack.toFixed(3);
+    const cost = Number(p.last_cost || p.stock[wid].avg_cost || 0);
+    return { p, qty, min, lack, packs, buy, cost, sum: cost * buy };
+  }).sort((a, b) => (a.qty / a.min) - (b.qty / b.min) || a.p.name.localeCompare(b.p.name, 'ru'));
+}
+
+function lowPanel(wh, items) {
+  const total = items.reduce((a, x) => a + x.sum, 0), noPrice = items.filter(x => !x.cost).length;
+  return `<div class="card low-panel"><div class="low-h"><div><b>Нужно докупить на «${esc(wh.name)}»</b><div class="small mute">${items.length} ${plural(items.length, 'позиция', 'позиции', 'позиций')} ниже минимального остатка${total ? ` · ориентировочно ${fmt(total)} по ценам последних закупок` : ''}${noPrice ? ` · без цены: ${noPrice}` : ''}</div></div>
+    <div class="row" style="gap:6px"><button class="btn s" data-lowcopy title="Скопировать список — например, отправить поставщику">Скопировать список</button><button class="btn s p" data-lowbuy title="Открыть приход с этими позициями и количествами">Оформить приход</button></div></div>
+    <table class="low-t"><tr><th>Позиция</th><th class="r">Остаток</th><th class="r">Минимум</th><th class="r">Докупить</th><th class="r">≈ Сумма</th></tr>
+    ${items.map(x => `<tr><td><a href="#" data-prod="${x.p.id}"><b>${esc(x.p.name)}</b></a>${x.p.category_path ? `<div class="small mute">${esc(x.p.category_path)}</div>` : ''}</td>
+      <td class="r num ${x.qty <= 0 ? 'warn' : ''}">${x.qty <= 0 ? 'нет' : num(x.qty, 3) + ' ' + esc(x.p.unit)}</td><td class="r num">${num(x.min, 3)} ${esc(x.p.unit)}</td>
+      <td class="r num"><b>${num(x.buy, 3)} ${esc(x.p.unit)}</b>${x.packs ? `<div class="small mute">${x.packs} × ${esc(x.p.pack_name || 'уп.')}</div>` : ''}</td>
+      <td class="r num">${x.cost ? fmt(x.sum) : '<span class="mute">—</span>'}</td></tr>`).join('')}</table></div>`;
+}
+
+async function copyLow(wh, items) {
+  const text = `Нужно докупить (${wh.name}):\n` + items.map((x, i) => `${i + 1}. ${x.p.name} — ${num(x.buy, 3)} ${x.p.unit}${x.packs ? ` (${x.packs} × ${x.p.pack_name || 'уп.'})` : ''}`).join('\n');
+  try { await navigator.clipboard.writeText(text); toast('Список скопирован'); }
+  catch { const mm = openModal(`<h2>Список для закупки</h2><p class="small mute">Скопируйте текст вручную.</p><textarea style="width:100%;min-height:220px">${esc(text)}</textarea><div class="actions"><button class="btn" data-close>Закрыть</button></div>`); mm.querySelector('[data-close]').onclick = closeModal; }
+}
+const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? b : c; };
 
 // ---------- таблица склада деревом: категория → подкатегории → позиции ----------
 function prodRow(p, depth) {
@@ -193,7 +231,7 @@ async function prodDrawer(main, r, pid) {
 }
 
 // ---------- приход: несколько строк, позиции на лету ----------
-function receiptModal(main, r) {
+function receiptModal(main, r, preset = []) {
   const wh = whs.find(w => w.id === whSel);
   const prodOpts = () => [...prods.map(p => ({ value: p.id, label: p.name, sub: p.unit + (p.category_path ? ' · ' + p.category_path : '') })), { value: 'new', label: '+ новая позиция…' }];
   const inp = 'padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
@@ -249,6 +287,13 @@ function receiptModal(main, r) {
   // три стартовые строки уже в разметке
   for (let i = 0; i < 3; i++) { mountLine(i); n = i + 1; }
   m.querySelector('[data-more]').onclick = () => addLine();
+  // предзаполнение из «Нужно докупить»: позиция, количество до минимума, цена последней закупки
+  preset.forEach((x, k) => {
+    const i = k < 3 ? k : addLine();
+    ctl(`p${i}`).set(String(x.product_id));
+    f[`q${i}`].value = x.qty || ''; f[`c${i}`].value = x.unit_cost ? Number(x.unit_cost) : '';
+    sync(i); markup(i);
+  });
   // две кнопки — камера и файл с устройства — один обработчик
   let scannedFile = null;   // распознанная накладная — после проведения прикрепляется к приходу (видна в «Расходах»)
   m.querySelectorAll('[data-scan]').forEach(scan => scan.onchange = async () => {

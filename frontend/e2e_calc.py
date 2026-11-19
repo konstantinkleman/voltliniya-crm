@@ -154,8 +154,10 @@ async def main():
         H = {"Authorization": "Bearer " + tok}
         wh = await (await pg.request.post(BASE + "/api/stock/warehouses", headers=H, data={"name": "Основной склад"})).json()
         prods = []
-        for nm, un in (("Кабель ВВГнг-LS 3×2,5 (бухта 100 м)", "м"), ("Подрозетник d68 глубокий", "шт"), ("Автомат ABB S201 C16", "шт")):
-            prods.append(await (await pg.request.post(BASE + "/api/stock/products", headers=H, data={"name": nm, "unit": un})).json())
+        for nm, un, mn, pk in (("Кабель ВВГнг-LS 3×2,5 (бухта 100 м)", "м", 500, 100), ("Подрозетник d68 глубокий", "шт", None, None),
+                               ("Автомат ABB S201 C16", "шт", 10, None), ("Розетка с заземлением, белая", "шт", 20, None)):
+            prods.append(await (await pg.request.post(BASE + "/api/stock/products", headers=H, data={
+                "name": nm, "unit": un, "min_qty": mn, "pack_qty": pk, "pack_name": "бухта" if pk else None})).json())
         import datetime as _dt
         day = _dt.date.today().isoformat()
         mvs = await (await pg.request.post(BASE + "/api/stock/receipt", headers=H, data={
@@ -179,6 +181,27 @@ async def main():
             over = await page.evaluate("document.documentElement.scrollWidth - innerWidth")
             if over > 1:
                 errors.append(f"{name}: горизонтальная прокрутка {over}px")
+        # склад: «Ниже минимума» раскрывает «Нужно докупить» → «Оформить приход» с количествами
+        await pg.request.post(BASE + "/api/stock/receipt", headers=H, data={"warehouse_id": wh["id"], "date": day,
+                              "lines": [{"product_id": prods[3]["id"], "qty": 6, "unit_cost": 389}]})
+        await pg.request.post(BASE + "/api/stock/adjust", headers=H, data={"warehouse_id": wh["id"], "lines": [{"product_id": prods[3]["id"], "actual_qty": 0}]})
+        for page, name in ((pg, "m16-stock-low"), (dp, "d06-stock-low")):
+            await page.evaluate("localStorage.removeItem('stock.lowOpen')")
+            await page.goto(BASE + f"/#/stock?wh={wh['id']}"); await page.wait_for_selector("[data-lowtoggle]")
+            assert "2" in await page.locator("[data-lowtoggle] .v").inner_text()
+            assert await page.locator(".low-panel").count() == 0
+            await page.click("[data-lowtoggle]"); await page.wait_for_selector(".low-panel")
+            txt = await page.locator(".low-panel").inner_text()
+            assert "Кабель" in txt and "Розетка" in txt and "Автомат" not in txt and "2 × бухта" in txt, txt
+            await page.wait_for_timeout(300)
+            await page.screenshot(path=f"{OUT}/{name}.png", full_page=True)
+            over = await page.evaluate("document.documentElement.scrollWidth - innerWidth")
+            if over > 1:
+                errors.append(f"{name}: горизонтальная прокрутка {over}px")
+        await dp.click("[data-lowbuy]"); await dp.wait_for_selector("#rc-lines")
+        qs = [await dp.locator(f"input[name=q{i}]").input_value() for i in range(2)]
+        assert sorted(qs) == ["20", "200"], qs
+        await dp.wait_for_timeout(300); await dp.screenshot(path=f"{OUT}/d07-stock-low-receipt.png")
         await b.close()
 
 
