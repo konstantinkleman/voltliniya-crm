@@ -442,3 +442,8 @@ tr.exp-det>td{background:var(--surface2);padding:4px 14px 14px}
 }
 /* на телефоне «Ниже минимума» и список — первыми */
 @media (max-width:560px){.kpi-btn{order:-2}.low-panel{order:-1}}
+
+/* Склад: стоимость остатков для реализации (по ценам клиенту) в карточках */
+.kpi-sale{margin-top:10px;padding-top:9px;border-top:1px solid var(--line2)}
+.kpi-sale .v2{font-size:18px;font-weight:800;letter-spacing:-.02em;margin-top:1px;color:var(--ok)}
+.kpi .d.warn{color:var(--warn)}
