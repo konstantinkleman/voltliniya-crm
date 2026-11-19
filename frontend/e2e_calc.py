@@ -170,7 +170,7 @@ async def main():
         for page, name in ((pg, "m15-expenses"), (dp, "d05-expenses")):
             await page.goto(BASE + "/#/expenses"); await page.wait_for_selector("tr.exp-row")
             await page.locator("tr.exp-row", has_text="Закупка материалов").first.click()
-            await page.wait_for_selector(".exp-rc .exp-ln"); await page.wait_for_timeout(400)
+            await page.wait_for_selector(".exp-rc .exp-ln-t"); await page.wait_for_timeout(400)
             assert await page.locator(".exp-rc .exp-ln:not(.exp-ln-h):not(.exp-ln-t)").count() == 3
             assert "УПД-4512" in await page.locator(".exp-rc").inner_text()
             assert await page.locator(".exp-file [data-open]").count() >= 1
