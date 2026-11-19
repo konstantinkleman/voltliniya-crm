@@ -65,7 +65,7 @@ def migrate():
     wanted = {
         "objects": [("crew_sum_override", "NUMERIC(14,2)"), ("salary_foreman_id", "INTEGER")],
         "material_lines": [("movement_id", "INTEGER")],
-        "expenses": [("crew_id", "INTEGER"), ("external_ref", "VARCHAR(120) UNIQUE")],
+        "expenses": [("crew_id", "INTEGER"), ("external_ref", "VARCHAR(120) UNIQUE"), ("stock_batch", "VARCHAR(40)")],
         "leads": [("external_ref", "VARCHAR(120)"), ("utm", "VARCHAR(500)")],
         "estimates": [("contract", "TEXT")],
     }

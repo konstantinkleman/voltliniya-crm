@@ -150,6 +150,35 @@ async def main():
         await dp.goto(BASE + f"/#/calc/{eid}"); await dp.wait_for_selector(".tcards"); await dp.wait_for_timeout(500)
         await dp.screenshot(path=f"{OUT}/d03-calc-outdated.png")
         assert await dp.locator("[data-outdated]").count() == 1
+        # расходы: раскрыть «Закупку материалов» — что покупалось и накладная (телефон и десктоп)
+        H = {"Authorization": "Bearer " + tok}
+        wh = await (await pg.request.post(BASE + "/api/stock/warehouses", headers=H, data={"name": "Основной склад"})).json()
+        prods = []
+        for nm, un in (("Кабель ВВГнг-LS 3×2,5 (бухта 100 м)", "м"), ("Подрозетник d68 глубокий", "шт"), ("Автомат ABB S201 C16", "шт")):
+            prods.append(await (await pg.request.post(BASE + "/api/stock/products", headers=H, data={"name": nm, "unit": un})).json())
+        import datetime as _dt
+        day = _dt.date.today().isoformat()
+        mvs = await (await pg.request.post(BASE + "/api/stock/receipt", headers=H, data={
+            "warehouse_id": wh["id"], "date": day, "supplier": "ЭТМ", "doc_number": "УПД-4512", "add_expense": True,
+            "lines": [{"product_id": prods[0]["id"], "qty": 300, "unit_cost": 86.4}, {"product_id": prods[1]["id"], "qty": 120, "unit_cost": 11.9},
+                      {"product_id": prods[2]["id"], "qty": 14, "unit_cost": 612}]})).json()
+        png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c633873edc17f0008760382857175320000000049454e44ae426082")
+        r = await pg.request.post(BASE + f"/api/stock/receipt/{mvs[0]['batch']}/file", headers=H,
+                                  multipart={"file": {"name": "upd-4512.png", "mimeType": "image/png", "buffer": png}})
+        assert r.ok, await r.text()
+        await pg.request.post(BASE + "/api/expenses", headers=H, data={"date": day, "amount": 4990, "category": "tools", "note": "Биты и коронки", "method": "cash"})
+        for page, name in ((pg, "m15-expenses"), (dp, "d05-expenses")):
+            await page.goto(BASE + "/#/expenses"); await page.wait_for_selector("tr.exp-row")
+            await page.locator("tr.exp-row", has_text="Закупка материалов").first.click()
+            await page.wait_for_selector(".exp-rc .exp-ln-t"); await page.wait_for_timeout(400)
+            assert await page.locator(".exp-rc .exp-ln:not(.exp-ln-h):not(.exp-ln-t)").count() == 3
+            assert "УПД-4512" in await page.locator(".exp-rc").inner_text()
+            assert await page.locator(".exp-file [data-open]").count() >= 1
+            await page.locator("tr.exp-row", has_text="Инструмент").first.click(); await page.wait_for_timeout(500)
+            await page.screenshot(path=f"{OUT}/{name}.png", full_page=True)
+            over = await page.evaluate("document.documentElement.scrollWidth - innerWidth")
+            if over > 1:
+                errors.append(f"{name}: горизонтальная прокрутка {over}px")
         await b.close()
 
 

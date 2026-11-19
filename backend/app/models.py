@@ -290,6 +290,8 @@ class Expense(Base, TimestampMixin):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     # автозагрузка (Директ, Авито, Профи, SMS): ключ строки у источника — повторная загрузка обновляет, а не дублирует
     external_ref: Mapped[str | None] = mapped_column(String(120), unique=True)
+    # закупка материалов через приход на склад: batch строк прихода (состав закупки) и файл накладной
+    stock_batch: Mapped[str | None] = mapped_column(String(40), index=True)
     foreman: Mapped["User | None"] = relationship(foreign_keys=[foreman_id])
     crew: Mapped["Crew | None"] = relationship()
 
