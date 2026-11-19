@@ -18,7 +18,7 @@ function checkVersion(r) {
   if (serverVersion === null) { serverVersion = v; return; }
   if (v !== serverVersion && !updateAvailable) {
     updateAvailable = true;
-    window.addEventListener('hashchange', () => location.reload(), { once: true });
+    window.addEventListener('hashchange', () => { try { sessionStorage.setItem('vl-nav-reload', '1'); } catch {} location.reload(); }, { once: true });
     document.dispatchEvent(new CustomEvent('app-update'));
   }
 }

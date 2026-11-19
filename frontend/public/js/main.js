@@ -76,20 +76,30 @@ export async function render() {
     try { state.me = await api.get('/api/me'); state.dicts = await getDicts(); }
     catch { return renderLogin(); }
   }
-  if (r.page === 'login') { location.hash = state.me.is_director ? '#/leads' : '#/my'; return; }
+  if (r.page === 'login') { location.hash = state.me.is_director ? '#/objects' : '#/my'; return; }
   // прораб без прав директора — только мобильный кабинет
   if (!state.me.is_director || r.page === 'my') {
     return foreman.render(app, r, state);
   }
   if (r.page !== 'calc') window.onbeforeunload = null;
-  const page = PAGES[r.page] ? r.page : 'leads';
-  if (!PAGES[r.page]) { location.hash = '#/leads'; return; }
+  const page = PAGES[r.page] ? r.page : 'objects';
+  if (!PAGES[r.page]) { location.hash = '#/objects'; return; }
   const main = shell(page, '<div class="empty">Загрузка…</div>');
   try { await PAGES[page].render(main, r, state); }
   catch (e) { main.innerHTML = `<div class="empty"><b>Не удалось загрузить</b>${esc(e.message)}</div>`; }
 }
 
-async function boot() { await render(); }
+// При открытии CRM (новая вкладка, ярлык на экране «Домой», восстановленная вкладка Safari) — раздел «Объекты»,
+// а не последняя открытая карточка объекта. Перезагрузка из-за обновления CRM на переходе — не в счёт.
+function coldStart() {
+  let navReload = false;
+  try { navReload = sessionStorage.getItem('vl-nav-reload') === '1'; sessionStorage.removeItem('vl-nav-reload'); } catch {}
+  if (navReload) return;
+  const h = location.hash.replace(/^#\/?/, '');
+  if (/^objects\/\d+/.test(h)) history.replaceState(null, '', '#/objects');
+}
+
+async function boot() { coldStart(); await render(); }
 window.addEventListener('hashchange', render);
 // на сервере вышло обновление — перезагрузимся при следующем переходе (api.js), а пока предупредим
 document.addEventListener('app-update', () => toast('Вышло обновление CRM — страница обновится при переходе в другой раздел'));
