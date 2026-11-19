@@ -89,7 +89,7 @@ th.sortable{cursor:pointer;user-select:none}th.sortable:hover{color:var(--ink)}t
 /* cards & tables */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
 .pad{padding:16px 18px}
-.grid{display:grid;gap:14px}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.grid{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}.grid>*{min-width:0}.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .kpi .l{color:var(--mute);font-size:12px;font-weight:600}
 .kpi .v{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
 .kpi .d{font-size:12px;color:var(--ink2);margin-top:2px}
@@ -188,12 +188,12 @@ tr.mute td{color:var(--mute)}
   .nav a span{display:none}
   .rail .user{margin:0 0 0 auto;border:0;padding:0}
   .main{padding:16px}
-  .g2,.g3,.g4{grid-template-columns:1fr 1fr}
+  .g2,.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ladder .li{grid-template-columns:120px 1fr 100px}
   .fields2{grid-template-columns:1fr}
   .kan{grid-template-columns:repeat(4,240px)}
 }
-@media (max-width:560px){.g2,.g3,.g4{grid-template-columns:1fr}}
+@media (max-width:560px){.g2,.g3,.g4{grid-template-columns:minmax(0,1fr)}}
 
 /* calculator */
 td.num,th.num{text-align:right;white-space:nowrap}.b{font-weight:700}
@@ -355,5 +355,29 @@ table.params input.txt{width:100%;min-width:240px;text-align:left}
   .rooms-t .c{width:48px;padding:8px 2px}.rooms-t .x-col{width:30px}
   .rooms-t th{font-size:10px;padding:8px 2px}
   .cb{width:34px;height:34px}
+}
+/* объект на телефоне: «лестница» прибыли и таблица бригады без выхода за край */
+@media (max-width:560px){
+  .ladder .li{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px}
+  .ladder .li .bar{grid-column:1 / -1;grid-row:2;height:10px}
+  .ladder .li>span:first-child{font-size:13px}
+  table.crew-t,table.crew-t tbody{display:block}
+  table.crew-t tr:first-child{display:none}
+  table.crew-t tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 8px;padding:10px 0;border-bottom:1px solid var(--line2)}
+  table.crew-t td{display:block;border:0;padding:0;text-align:left!important}
+  table.crew-t td:nth-child(1){grid-column:1 / 3;font-size:16px;align-self:center}
+  table.crew-t td:nth-child(5){grid-column:3;grid-row:1;text-align:right!important;white-space:nowrap}
+  table.crew-t td:nth-child(2)::before{content:"Доля";display:block;font-size:11px;color:var(--mute);font-weight:600}
+  table.crew-t td:nth-child(3)::before{content:"Выплачено";display:block;font-size:11px;color:var(--mute);font-weight:600}
+  table.crew-t td:nth-child(4)::before{content:"Остаток";display:block;font-size:11px;color:var(--mute);font-weight:600}
+  .card .row.sp>h2{flex:1 0 100%}
+  table.mat-t,table.mat-t tbody{display:block}
+  table.mat-t tr:first-child{display:none}
+  table.mat-t tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:2px 10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line2)}
+  table.mat-t td{display:block;border:0;padding:0!important}
+  table.mat-t tr:not(.grp) td:first-child{grid-column:1 / -1}
+  table.mat-t tr.grp{background:var(--surface2);padding:6px 8px;grid-template-columns:minmax(0,1fr) auto}
+  table.mat-t tr.grp td:empty{display:none}
+  table.mat-t td[colspan="4"]{grid-column:1 / -1}
 }
 
