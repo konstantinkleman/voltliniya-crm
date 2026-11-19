@@ -115,7 +115,7 @@ async function renderOne(main, id) {
           ${f.crew_overridden
             ? `<tr><td>Сумма бригаде по договорённости <span class="small mute">расчёт ${num(Number(f.crew_share) * 100)}% = ${fmt(f.crew_calc)}, ${Number(f.crew_plan) < Number(f.crew_calc) ? 'на ' + fmt(Number(f.crew_calc) - Number(f.crew_plan)) + ' меньше' : 'на ' + fmt(Number(f.crew_plan) - Number(f.crew_calc)) + ' больше'}</span></td><td class="r num">${fmt(f.crew_plan)}</td></tr>`
             : `<tr><td>Сумма бригаде · ${num(Number(f.crew_share) * 100)}% от ${fmt(f.works_base)}</td><td class="r num">${fmt(f.crew_plan)}</td></tr>`}</table>
-        ${f.crews.length ? `<table style="margin-top:6px"><tr><th>Монтажник</th><th class="r">Доля</th><th class="r">Выплачено</th><th class="r">Остаток</th><th></th></tr>
+        ${f.crews.length ? `<table class="crew-t" style="margin-top:6px"><tr><th>Монтажник</th><th class="r">Доля</th><th class="r">Выплачено</th><th class="r">Остаток</th><th></th></tr>
           ${f.crews.map(c => `<tr><td><b>${esc(c.crew_name)}</b></td><td class="r num">${c.link_id ? `<a href="#" data-share="${c.link_id}" title="Задать долю">${fmt(c.plan)}</a><div class="small mute">${c.fixed ? 'задана вручную' : (f.crews.filter(x => x.link_id).length > 1 ? (f.crews.some(x => x.fixed) ? 'остаток суммы' : 'поровну') : '')}</div>` : '—'}</td><td class="r num">${fmt(c.paid)}</td><td class="r num ${Number(c.due) > 0 ? 'copper' : Number(c.due) < 0 ? 'warn' : ''}"><b>${fmt(c.due)}</b></td>
             <td class="r">${c.link_id ? `<button class="btn s" data-payto="${c.crew_id}" title="Выплата этому монтажнику">₽</button>${f.crews.filter(x => x.link_id).length > 1 ? ` <button class="btn s" data-rmcrew="${c.link_id}" title="Убрать с объекта">×</button>` : ''}` : ''}</td></tr>`).join('')}</table>`
           : `<div class="infobox" style="margin-top:8px">Монтажник не назначен — нажмите «+ монтажник».</div>`}
@@ -126,7 +126,7 @@ async function renderOne(main, id) {
     </div>
   </div>
   <div class="card pad" style="margin-top:14px"><div class="row sp"><h2>Материалы на объекте</h2><div class="row"><button class="btn s p" data-mat-stock>Списать со склада</button><button class="btn s" data-mat-return>Вернуть на склад</button><button class="btn s" data-mat>+ вручную</button></div></div>
-    <table style="margin-top:8px"><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Себестоимость</th><th></th></tr>
+    <table class="mat-t" style="margin-top:8px"><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Себестоимость</th><th></th></tr>
       ${materialsRows(o.materials)}
       <tr><td><b>Итого</b></td><td></td><td class="r num"><b>${fmt(f.materials_cost)}</b></td><td></td></tr></table></div>
   <div class="grid g2" style="margin-top:14px"><div class="card pad" id="obj-docs"></div><div class="card pad" id="obj-photos"></div></div>
