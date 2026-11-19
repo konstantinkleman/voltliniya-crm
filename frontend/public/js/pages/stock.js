@@ -16,7 +16,8 @@ try { const sv = JSON.parse(localStorage.getItem('stock.sort') || 'null'); if (s
 export function sortProducts(list, whId, key = sortKey, dir = sortDir) {
   const cost = (p) => Number((whId ? p.stock[whId] : null)?.avg_cost || (whId ? 0 : (Number(p.total_qty) ? Number(p.total_value) / Number(p.total_qty) : 0)));
   const value = (p) => whId ? Number(p.stock[whId]?.value || 0) : Number(p.total_value || 0);
-  const f = key === 'cost' ? cost : key === 'value' ? value : null;
+  const sale = (p) => Math.max(whId ? Number(p.stock[whId]?.qty || 0) : Number(p.total_qty || 0), 0) * Number(p.price || 0);
+  const f = key === 'cost' ? cost : key === 'value' ? value : key === 'sale' ? sale : null;
   return [...list].sort((a, b) => f ? (f(a) - f(b)) * dir || a.name.localeCompare(b.name, 'ru') : a.name.localeCompare(b.name, 'ru') * dir);
 }
 export const sortTh = (label, key, cls = '') => `<th class="${cls} sortable ${sortKey === key ? 'on' : ''}" data-sort="${key}" title="Сортировать">${label}${sortKey === key ? (sortDir === 1 ? ' ↑' : ' ↓') : ''}</th>`;
@@ -34,6 +35,7 @@ export async function render(main, r, state) {
   prods = await api.get('/api/stock/products' + (whSel ? '?warehouse_id=' + whSel : ''));
   const wh = whs.find(w => w.id === whSel);
   const total = whs.reduce((a, w) => a + Number(w.value), 0);
+  const allWh = ['value', 'sale_value', 'priced_cost', 'no_price', 'no_price_cost'].reduce((o, k) => (o[k] = whs.reduce((a, w) => a + Number(w[k] || 0), 0), o), {});
   const lowList = whSel ? lowItems(whSel) : [];
   const list = prods.filter(p => (!catSel || catSubtree(catSel).has(p.category_id)) && (!query || p.name.toLowerCase().includes(query.toLowerCase())));
 
@@ -42,8 +44,8 @@ export async function render(main, r, state) {
   <div class="row sp" style="margin-bottom:14px"><div class="seg">${whs.map(w => `<button class="${w.id === whSel ? 'on' : ''}" data-wh="${w.id}">${esc(w.name)}${w.pending_in ? ` <span class="tag warn">в пути ${w.pending_in}</span>` : ''}</button>`).join('')}<button data-newwh title="Новый склад">+</button></div>
     <input class="btn" data-q placeholder="Поиск по названию" value="${esc(query)}" style="min-width:220px"></div>
   ${wh ? `<div class="grid g4" style="margin-bottom:14px">
-    <div class="card pad kpi"><div class="l">${esc(wh.name)}${wh.foreman_name ? ' · ' + esc(wh.foreman_name) : ''}</div><div class="v num">${fmt(wh.value)}</div><div class="d">${wh.positions} позиций по средней себестоимости</div></div>
-    <div class="card pad kpi"><div class="l">Все склады</div><div class="v num">${fmt(total)}</div><div class="d">${whs.length} ${whs.length === 1 ? 'склад' : 'склада'}</div></div>
+    <div class="card pad kpi"><div class="l">${esc(wh.name)}${wh.foreman_name ? ' · ' + esc(wh.foreman_name) : ''}</div><div class="v num">${fmt(wh.value)}</div><div class="d">по себестоимости · ${wh.positions} ${plural(wh.positions, 'позиция', 'позиции', 'позиций')}</div>${saleBlock(wh)}</div>
+    <div class="card pad kpi"><div class="l">Все склады</div><div class="v num">${fmt(total)}</div><div class="d">по себестоимости · ${whs.length} ${plural(whs.length, 'склад', 'склада', 'складов')}</div>${saleBlock(allWh)}</div>
     <button type="button" class="card pad kpi kpi-btn ${lowOpen ? 'on' : ''}" data-lowtoggle ${lowList.length ? '' : 'disabled'} aria-expanded="${lowOpen && lowList.length ? 'true' : 'false'}"><div class="l">Ниже минимума</div><div class="v num ${lowList.length ? 'warn' : ''}">${lowList.length}</div><div class="d">${lowList.length ? (lowOpen ? '▾ скрыть список' : '▸ показать, что докупить') : 'всё в норме'}</div></button>
     <div class="card pad kpi"><div class="l">В пути</div><div class="v num">${wh.pending_in}</div><div class="d">${wh.pending_in ? '<a href="#" data-pending>подтвердить получение</a>' : 'перемещений нет'}</div></div>
     ${lowOpen && lowList.length ? lowPanel(wh, lowList) : ''}</div>` : ''}
@@ -51,7 +53,7 @@ export async function render(main, r, state) {
     <button class="${!catSel ? 'on' : ''}" data-cat="">Все позиции<span class="c">${prods.length}</span></button>
     ${renderTree(null, 0)}
     <button class="l1" style="color:var(--act)" data-newcat>+ категория</button></div>
-   <div class="card wrap">${list.length ? `<div class="row sp" style="padding:8px 12px 0"><span class="small mute">Нажмите на категорию, чтобы раскрыть</span><button class="btn s" data-expand>Раскрыть / свернуть всё</button></div><table><tr>${sortTh('Позиция', 'name')}<th class="r">Остаток</th>${sortTh('Себест.', 'cost', 'r')}<th class="r">Клиенту</th>${sortTh('Стоимость', 'value', 'r')}<th></th></tr>
+   <div class="card wrap">${list.length ? `<div class="row sp" style="padding:8px 12px 0"><span class="small mute">Нажмите на категорию, чтобы раскрыть</span><button class="btn s" data-expand>Раскрыть / свернуть всё</button></div><table><tr>${sortTh('Позиция', 'name')}<th class="r">Остаток</th>${sortTh('Себест.', 'cost', 'r')}<th class="r">Клиенту</th>${sortTh('По себест.', 'value', 'r')}${sortTh('Для реализации', 'sale', 'r')}<th></th></tr>
     ${stockTreeRows(list)}</table>`
     : emptyState(prods.length ? 'Ничего не найдено' : 'Номенклатуры пока нет', prods.length ? 'Измените фильтр или поиск.' : 'Нажмите «Приход» — позиции можно создать прямо в накладной, или «Новая позиция».')}</div></div>`;
 
@@ -75,6 +77,15 @@ export async function render(main, r, state) {
   main.querySelector('[data-pending]')?.addEventListener('click', (e) => { e.preventDefault(); pendingDrawer(main, r); });
   main.querySelectorAll('[data-prod]').forEach(a => a.onclick = (e) => { e.preventDefault(); prodDrawer(main, r, Number(a.dataset.prod)); });
   main.querySelectorAll('[data-issue]').forEach(b => b.onclick = () => issueModal(main, r, Number(b.dataset.issue)));
+}
+
+// стоимость остатков по ценам клиенту: сумма, наценка к себестоимости тех же позиций, позиции без цены
+function saleBlock(w) {
+  const sale = Number(w.sale_value || 0), pc = Number(w.priced_cost || 0), np = Number(w.no_price || 0);
+  const mk = sale - pc;
+  return `<div class="kpi-sale"><div class="l">Для реализации</div><div class="v2 num">${fmt(sale)}</div>
+    <div class="d">${sale ? `наценка ${mk >= 0 ? '+' : ''}${fmt(mk)}${pc > 0 ? ` (${mk >= 0 ? '+' : ''}${num(mk / pc * 100)}%)` : ''}` : 'цены клиенту не заданы'}</div>
+    ${np ? `<div class="d warn" title="У этих позиций не задана цена клиенту — откройте позицию и укажите">без цены клиенту: ${np} ${plural(np, 'позиция', 'позиции', 'позиций')} на ${fmt(w.no_price_cost)} — не учтены</div>` : ''}</div>`;
 }
 
 // ---------- «Нужно докупить»: позиции склада ниже минимального остатка (включая закончившиеся) ----------
@@ -112,18 +123,19 @@ function prodRow(p, depth) {
   const st = whSel ? (p.stock[whSel] || {}) : null; const qty = st ? Number(st.qty || 0) : Number(p.total_qty); const low = p.min_qty && qty < Number(p.min_qty);
   return `<tr class="${low ? 'low' : ''} ${qty <= 0 ? 'mute' : ''}"><td style="padding-left:${12 + depth * 18}px"><a href="#" data-prod="${p.id}"><b>${esc(p.name)}</b></a><div class="small mute">${query ? esc(p.category_path || 'без категории') + ' · ' : ''}${p.sku ? esc(p.sku) : ''}${low ? ' · <span class="warn">ниже минимума ' + num(p.min_qty) + '</span>' : ''}</div></td>
     <td class="r num">${num(qty, 3)} ${esc(p.unit)}${p.pack_qty && qty > 0 ? `<div class="small mute">${num(qty / Number(p.pack_qty), 1)} ${esc(p.pack_name || 'уп.')}</div>` : ''}</td>
-    <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn" title="Цена клиенту не задана — откройте позицию и укажите">—</span>'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td>
+    <td class="r num">${st && st.avg_cost ? num(st.avg_cost, 2) + ' ₽' : '—'}</td><td class="r num">${p.price ? num(p.price, 2) + ' ₽' : '<span class="warn" title="Цена клиенту не задана — откройте позицию и укажите">—</span>'}</td><td class="r num">${st ? fmt(st.value) : fmt(p.total_value)}</td><td class="r num">${qty > 0 && p.price ? fmt(qty * Number(p.price)) : '<span class="mute">—</span>'}</td>
     <td class="r">${qty > 0 && whSel ? `<button class="btn s" data-issue="${p.id}">Списать</button>` : ''}</td></tr>`;
 }
 function stockTreeRows(list) {
   const qtyOf = (p) => whSel ? Number(p.stock[whSel]?.qty || 0) : Number(p.total_qty);
   const valOf = (p) => whSel ? Number(p.stock[whSel]?.value || 0) : Number(p.total_value || 0);
+  const saleOf = (p) => Math.max(qtyOf(p), 0) * Number(p.price || 0);
   const sorted = (ps) => [...sortProducts(ps.filter(p => qtyOf(p) > 0), whSel), ...sortProducts(ps.filter(p => qtyOf(p) <= 0), whSel)];
   const ids = new Set(list.map(p => p.id));
   const inSub = (cid) => { const sub = catSubtree(cid); return list.filter(p => sub.has(p.category_id)); };
   const forced = !!query;   // при поиске всё, что найдено, раскрыто
   const catRow = (key, label, ps, depth) => { const isOpen = forced || openCats.has(key); const inS = ps.filter(p => qtyOf(p) > 0).length;
-    return `<tr class="tcat click" data-tcat="${key}"><td style="padding-left:${12 + depth * 18}px"><b>${isOpen ? '▾' : '▸'} ${esc(label)}</b> <span class="small mute">${ps.length} поз.${inS !== ps.length ? ' · в наличии ' + inS : ''}</span></td><td></td><td></td><td></td><td class="r num"><b>${fmt(ps.reduce((a, p) => a + valOf(p), 0))}</b></td><td></td></tr>`; };
+    return `<tr class="tcat click" data-tcat="${key}"><td style="padding-left:${12 + depth * 18}px"><b>${isOpen ? '▾' : '▸'} ${esc(label)}</b> <span class="small mute">${ps.length} поз.${inS !== ps.length ? ' · в наличии ' + inS : ''}</span></td><td></td><td></td><td></td><td class="r num"><b>${fmt(ps.reduce((a, p) => a + valOf(p), 0))}</b></td><td class="r num"><b>${fmt(ps.reduce((a, p) => a + saleOf(p), 0))}</b></td><td></td></tr>`; };
   const level = (pid, depth) => {
     let html = '';
     const children = cats.filter(c => c.parent_id === pid).sort((a, b) => a.name.localeCompare(b.name, 'ru'));

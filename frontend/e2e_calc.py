@@ -157,7 +157,8 @@ async def main():
         for nm, un, mn, pk in (("Кабель ВВГнг-LS 3×2,5 (бухта 100 м)", "м", 500, 100), ("Подрозетник d68 глубокий", "шт", None, None),
                                ("Автомат ABB S201 C16", "шт", 10, None), ("Розетка с заземлением, белая", "шт", 20, None)):
             prods.append(await (await pg.request.post(BASE + "/api/stock/products", headers=H, data={
-                "name": nm, "unit": un, "min_qty": mn, "pack_qty": pk, "pack_name": "бухта" if pk else None})).json())
+                "name": nm, "unit": un, "min_qty": mn, "pack_qty": pk, "pack_name": "бухта" if pk else None,
+                "client_price": {"м": 121.8, "шт": None}[un] if "Подрозетник" not in nm else 25})).json())
         import datetime as _dt
         day = _dt.date.today().isoformat()
         mvs = await (await pg.request.post(BASE + "/api/stock/receipt", headers=H, data={
@@ -193,6 +194,8 @@ async def main():
             await page.click("[data-lowtoggle]"); await page.wait_for_selector(".low-panel")
             txt = await page.locator(".low-panel").inner_text()
             assert "Кабель" in txt and "Розетка" in txt and "Автомат" not in txt and "2 × бухта" in txt, txt
+            kp = (await page.locator(".kpi-sale").first.inner_text()).replace("\xa0", " ").replace("\u202f", " ")
+            assert "39 540" in kp and "без цены клиенту: 1" in kp, kp   # 300 м × 121,8 + 120 шт × 25; автоматы без цены
             await page.wait_for_timeout(300)
             await page.screenshot(path=f"{OUT}/{name}.png", full_page=True)
             over = await page.evaluate("document.documentElement.scrollWidth - innerWidth")

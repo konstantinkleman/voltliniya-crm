@@ -196,6 +196,14 @@ with c:
     adj = post("/api/stock/adjust", json={"warehouse_id": wh["id"], "lines": [{"product_id": p1["id"], "actual_qty": 295}]})
     assert len(adj) == 1 and float(adj[0]["qty"]) == -5
     sm = get("/api/stock/summary"); assert len(sm["low"]) >= 1 and float(sm["total_value"]) > 0, sm
+    # стоимость остатков для реализации: остаток × цена клиенту; позиции без цены — отдельно
+    w0 = [w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]
+    pr = [x for x in get(f"/api/stock/products?warehouse_id={wh['id']}") if str(wh["id"]) in x["stock"] and float(x["stock"][str(wh["id"])]["qty"]) > 0]
+    exp_sale = sum(float(x["stock"][str(wh["id"])]["qty"]) * float(x["client_price"]) for x in pr if x["client_price"] is not None)
+    assert abs(float(w0["sale_value"]) - exp_sale) < 0.02 and exp_sale > 0, (w0, exp_sale)
+    assert w0["no_price"] == sum(1 for x in pr if x["client_price"] is None)
+    assert abs(float(w0["priced_cost"]) + float(w0["no_price_cost"]) - float(w0["value"])) < 0.02
+    assert float(get("/api/stock/summary")["total_sale_value"]) >= float(w0["sale_value"])
     # «Нужно докупить»: ниже минимума, в том числе закончившиеся; цена последней закупки
     wg = post("/api/stock/products", json={"name": "Клеммы Wago 221-413", "unit": "шт", "min_qty": 100})
     low0 = [w for w in get("/api/stock/warehouses") if w["id"] == wh["id"]][0]["low"]

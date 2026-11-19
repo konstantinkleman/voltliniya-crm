@@ -32,6 +32,10 @@ class WarehouseOut(ORM):
     value: Decimal = Decimal(0)        # стоимость остатков
     positions: int = 0
     low: int = 0                        # позиций ниже минимума
+    sale_value: Decimal = Decimal(0)    # стоимость остатков по ценам клиенту (для реализации)
+    priced_cost: Decimal = Decimal(0)   # себестоимость тех же позиций (у которых есть цена клиенту) — для наценки
+    no_price: int = 0                   # позиций в наличии без цены клиенту (в реализацию не вошли)
+    no_price_cost: Decimal = Decimal(0) # их себестоимость
     pending_in: int = 0                 # перемещений, ждущих подтверждения
 
 
@@ -51,6 +55,11 @@ def _wh_out(db: Session, w: m.Warehouse, bal: dict) -> WarehouseOut:
     mine = {k: v for k, v in seen.items() if v[0] > 0}
     o.value = S.q2(sum((q * c for q, c in mine.values()), Decimal(0)))
     o.positions = len(mine)
+    priced = {k: v for k, v in mine.items() if prods[k[1]].client_price is not None}
+    o.sale_value = S.q2(sum((q * prods[pid].client_price for (_, pid), (q, _) in priced.items()), Decimal(0)))
+    o.priced_cost = S.q2(sum((q * c for q, c in priced.values()), Decimal(0)))
+    o.no_price = len(mine) - len(priced)
+    o.no_price_cost = S.q2(o.value - o.priced_cost)
     # ниже минимума — в том числе закончившиеся (остаток 0), если позиция на этом складе была
     o.low = sum(1 for (wid, pid), (q, _) in seen.items() if prods[pid].min_qty and q < prods[pid].min_qty)
     o.pending_in = db.scalar(select(m.StockMovement).where(m.StockMovement.warehouse_id == w.id, m.StockMovement.confirmed == False).limit(1)) is not None and \
@@ -600,6 +609,7 @@ def summary(_: m.User = Depends(director), db: Session = Depends(get_db)):
     prods = {p.id: p for p in db.scalars(select(m.Product)).all()}
     by_wh = {}
     low = []
+    sale = Decimal(0)
     for (wid, pid), (q, c) in bal.items():
         p = prods.get(pid)
         if not p or not p.is_active or (wid in whs and not whs[wid].is_active):
@@ -608,9 +618,12 @@ def summary(_: m.User = Depends(director), db: Session = Depends(get_db)):
             low.append({"warehouse": whs[wid].name if wid in whs else wid, "product": p.name, "qty": max(q, Decimal(0)), "min_qty": p.min_qty, "unit": p.unit})
         if q > 0:
             by_wh.setdefault(wid, Decimal(0)); by_wh[wid] += q * c
+            if p.client_price is not None:
+                sale += q * p.client_price
     pending = db.scalars(select(m.StockMovement).where(m.StockMovement.confirmed == False)).all()  # noqa: E712
     return {
         "total_value": S.q2(sum(by_wh.values(), Decimal(0))),
+        "total_sale_value": S.q2(sale),   # остатки по ценам клиенту (позиции без цены не входят)
         "by_warehouse": [{"id": wid, "name": whs[wid].name if wid in whs else str(wid), "value": S.q2(v)} for wid, v in by_wh.items()],
         "low": low, "pending_transfers": len(pending),
     }
