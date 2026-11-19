@@ -89,8 +89,6 @@ async function fillDetails(td, id) {
       ${r.note ? `<div class="small mute" style="margin-top:6px">Комментарий к приходу: ${esc(r.note)}</div>` : ''}</div>`;
   } else if (e.category === 'materials') {
     body = '<div class="small mute">Состав закупки не найден: расход внесён без прихода на склад. Прикрепите фото накладной или чека — будет видно, что покупалось.</div>';
-  } else if (e.note) {
-    body = `<div>${esc(e.note)}</div>`;
   }
   const f = d.file;
   const isImg = f && /\.(jpe?g|png|webp|gif|heic)$/i.test(f.name);

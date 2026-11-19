@@ -406,6 +406,8 @@ tr.exp-det>td{background:var(--surface2);padding:4px 14px 14px}
   table.exp-t tr.exp-row td:nth-child(6){grid-column:3;grid-row:1}
   table.exp-t tr.exp-row td:nth-child(1),table.exp-t tr.exp-row td:nth-child(3),table.exp-t tr.exp-row td:nth-child(4){grid-column:1 / -1;font-size:12px;padding-left:14px}
   table.exp-t tr.exp-row td:empty{display:none}
+  table.exp-t tr.exp-row:hover td,table.exp-t tr.exp-row.open td{background:none}
+  table.exp-t tr.exp-row.open{background:var(--surface2)}
   table.exp-t tr.exp-det{display:block}
   table.exp-t tr.exp-det>td{display:block;padding:4px 10px 12px}
   .exp-ln{grid-template-columns:auto auto minmax(0,1fr);gap:2px 8px}
