@@ -151,6 +151,27 @@ with c:
     assert any(x["name"] == "Гофра d20" for x in prods)
     # расход закупки записался
     ex = get(f"/api/expenses?month={M}"); assert any(e["category"] == "materials" and float(e["amount"]) == 500*86+200*9 for e in ex), ex
+    # раскрытый расход: состав закупки из прихода + накладная
+    em = next(e for e in ex if e["category"] == "materials")
+    dt = get(f"/api/expenses/{em['id']}/details")
+    rc = dt["receipt"]; assert rc and rc["supplier"] == "Кабель-Центр" and rc["doc_number"] == "123" and rc["warehouse_name"], dt
+    assert [(l["name"], float(l["qty"]), float(l["unit_cost"]), float(l["sum"])) for l in rc["lines"]] == [
+        ("ВВГнг-LS 3×2,5", 500, 86, 43000), ("Подрозетник d68", 200, 9, 1800)], rc["lines"]
+    assert float(rc["total"]) == 44800 and dt["file"] is None and dt["category_name"] == "Закупка материалов"
+    r = c.post(f"/api/stock/receipt/{rc['batch']}/file", files={"file": ("накладная 123.jpg", b"\xff\xd8\xffJPEGDATA", "image/jpeg")}); assert r.status_code == 200, r.text
+    dt = get(f"/api/expenses/{em['id']}/details"); assert dt["file"]["name"] == "накладная_123.jpg", dt["file"]
+    r = c.get(f"/api/expenses/{em['id']}/file"); assert r.status_code == 200 and r.content == b"\xff\xd8\xffJPEGDATA"
+    assert c.post("/api/stock/receipt/nope/file", files={"file": ("a.jpg", b"x", "image/jpeg")}).status_code == 404
+    # старый расход без связи (приход 11-го без галочки, расход внесён вручную) — находится по дню и сумме
+    old = post("/api/expenses", json={"date": f"{M}-11", "amount": 100*92+200*9.5, "category": "materials"})
+    dt = get(f"/api/expenses/{old['id']}/details"); assert dt["receipt"] and len(dt["receipt"]["lines"]) == 2, dt
+    # обычный расход: без состава, но с файлом-чеком
+    tools = post("/api/expenses", json={"date": f"{M}-12", "amount": 5000, "category": "tools", "note": "перфоратор", "method": "cash"})
+    dt = get(f"/api/expenses/{tools['id']}/details"); assert dt["receipt"] is None and dt["method_name"] == "наличные" and dt["user_name"]
+    dt = c.post(f"/api/expenses/{tools['id']}/file", files={"file": ("check.pdf", b"%PDF-1.4 x", "application/pdf")}).json()
+    assert dt["file"]["name"] == "check.pdf"
+    assert c.delete(f"/api/expenses/{tools['id']}/file").json()["file"] is None
+    assert c.delete(f"/api/expenses/{tools['id']}").status_code == 200
     # списание на объект → материалы объекта по средней
     before = get(f"/api/objects/{obj['id']}")["finance"]["materials_cost"]
     r = c.post("/api/stock/issue", json={"warehouse_id": wh["id"], "product_id": p1["id"], "qty": 1000, "object_id": obj["id"]}); assert r.status_code == 400

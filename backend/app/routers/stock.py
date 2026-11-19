@@ -419,12 +419,22 @@ def post_receipt(data: ReceiptIn, user: m.User = Depends(director), db: Session 
     if data.add_expense:
         total = sum((Decimal(str(l["qty"])) * Decimal(str(l["unit_cost"])) for l in lines), Decimal(0))
         if total > 0:
-            db.add(m.Expense(date=data.date, amount=S.q2(total), category="materials", channel=None, user_id=user.id,
+            db.add(m.Expense(date=data.date, amount=S.q2(total), category="materials", channel=None, user_id=user.id, stock_batch=batch,
                              note=f"Закупка материалов{(' · ' + data.supplier) if data.supplier else ''}{(' · накладная ' + data.doc_number) if data.doc_number else ''}"))
     db.commit()
     for mv in mvs:
         db.refresh(mv)
     return [_mv_out(x) for x in mvs]
+
+
+@router.post("/receipt/{batch}/file")
+async def receipt_file(batch: str, file: UploadFile = File(...), _: m.User = Depends(director), db: Session = Depends(get_db)):
+    """Фото/PDF накладной к проведённому приходу — видно в раскрытом расходе «Закупка материалов»."""
+    from .expenses import file_dir, save_file
+    if not db.scalar(select(m.StockMovement.id).where(m.StockMovement.batch == batch, m.StockMovement.kind == "receipt").limit(1)):
+        raise HTTPException(404, "Приход не найден")
+    await save_file(file_dir(batch=batch), file)
+    return {"ok": True}
 
 
 class IssueLine(BaseModel):

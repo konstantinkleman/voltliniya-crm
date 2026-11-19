@@ -250,8 +250,10 @@ function receiptModal(main, r) {
   for (let i = 0; i < 3; i++) { mountLine(i); n = i + 1; }
   m.querySelector('[data-more]').onclick = () => addLine();
   // две кнопки — камера и файл с устройства — один обработчик
+  let scannedFile = null;   // распознанная накладная — после проведения прикрепляется к приходу (видна в «Расходах»)
   m.querySelectorAll('[data-scan]').forEach(scan => scan.onchange = async () => {
     const file = scan.files[0]; if (!file) return;
+    scannedFile = file;
     const status = m.querySelector('[data-scan-status]');
     status.textContent = 'Распознаю накладную… обычно 10–30 секунд'; scan.disabled = true;
     try {
@@ -305,7 +307,11 @@ function receiptModal(main, r) {
       else lines.push({ product_id: Number(sel.value), qty, unit_cost: cost, client_price });
     }
     if (!lines.length) return toast('Заполните хотя бы одну строку', true);
-    try { await api.post('/api/stock/receipt', { warehouse_id: Number(f.warehouse_id.value), date: f.date.value, supplier: f.supplier.value || null, doc_number: f.doc_number.value || null, lines, add_expense: f.add_expense.checked });
+    try { const mvs = await api.post('/api/stock/receipt', { warehouse_id: Number(f.warehouse_id.value), date: f.date.value, supplier: f.supplier.value || null, doc_number: f.doc_number.value || null, lines, add_expense: f.add_expense.checked });
+      if (scannedFile && mvs[0]?.batch) {
+        const fd = new FormData(); fd.append('file', scannedFile);
+        await api.upload(`/api/stock/receipt/${mvs[0].batch}/file`, fd).catch(err => toast('Приход проведён, но накладная не прикрепилась: ' + err.message, true));
+      }
       closeModal(); toast(`Приход проведён: ${lines.length} ${lines.length === 1 ? 'позиция' : 'позиции'}`); whSel = Number(f.warehouse_id.value); render(main, r, S); }
     catch (err) { toast(err.message, true); }
   };
